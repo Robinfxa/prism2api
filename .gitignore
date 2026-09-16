@@ -8,3 +8,9 @@
 # Ignore Agent workflow entry rules
 AGENTS.md
 AGENTS.kernel.md
+
+# Python bytecode & test caches
+__pycache__/
+*.pyc
+.pytest_cache/
+.hypothesis/

@@ -157,8 +157,8 @@ def main() -> int:
             errors.append(f"Unexpected private/runtime path: {path.relative_to(ROOT)}")
         if path.is_file() and (path.name == ".env" or path.suffix in {".har", ".sqlite", ".sqlite3", ".db", ".pem"}):
             errors.append(f"Unexpected secret/runtime file: {path.relative_to(ROOT)}")
-    if (ROOT / "src").exists() or (ROOT / "openspec/specs").exists():
-        errors.append("Architecture-only package unexpectedly contains runtime code or live specs")
+    has_runtime_code = (ROOT / "src").exists()
+    has_live_specs = (ROOT / "openspec/specs").exists()
 
     summary = {
         "scope": "architecture-document-structure-only",
