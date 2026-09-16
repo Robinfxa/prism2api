@@ -99,6 +99,9 @@ class StorageJournal:
         result.result_digest = digest
         manifest.output_digest = digest
 
+        man_final = self.settings.evidence_dir / f"{run_id}.json"
+        result.manifest_ref = str(man_final)
+
         # Write result file
         res_tmp = self.settings.results_dir / f"{run_id}.tmp"
         res_final = self.settings.results_dir / f"{run_id}.json"
@@ -107,7 +110,6 @@ class StorageJournal:
 
         # Write manifest file
         man_tmp = self.settings.evidence_dir / f"{run_id}.tmp"
-        man_final = self.settings.evidence_dir / f"{run_id}.json"
         man_tmp.write_text(manifest.model_dump_json(indent=2), encoding="utf-8")
         os.replace(man_tmp, man_final)
 

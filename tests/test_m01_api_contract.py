@@ -38,8 +38,10 @@ def test_t01_unauthenticated_request_returns_401(client):
 
 
 def test_t02_unsupported_parameters_rejected(client):
-    """T02: Unsupported parameters like temperature return 400 Bad Request."""
+    """T02: Unsupported parameters return 400 Bad Request."""
     headers = {"X-API-Key": "test-secret-key"}
+    
+    # Temperature rejected
     response = client.post(
         "/v1/chat/completions",
         headers=headers,
@@ -51,6 +53,29 @@ def test_t02_unsupported_parameters_rejected(client):
     )
     assert response.status_code == 400
     assert "Unsupported parameter" in response.json()["detail"]
+
+    # Stream=True rejected
+    response = client.post(
+        "/v1/chat/completions",
+        headers=headers,
+        json={
+            "model": "prism-default",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True,
+        },
+    )
+    assert response.status_code == 400
+
+    # Invalid model returns 404
+    response = client.post(
+        "/v1/chat/completions",
+        headers=headers,
+        json={
+            "model": "unknown-model",
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+    )
+    assert response.status_code == 404
 
 
 def test_t03_models_endpoint_returns_only_usable_models(client):

@@ -77,13 +77,23 @@ class EventNormalizer:
             self.text_buffer += delta
         elif event_type == EventType.TEXT_SNAPSHOT:
             snapshot = payload.get("text", "")
-            if snapshot.startswith(self.text_buffer):
-                self.text_buffer = snapshot
-            else:
-                # Non-prefix rewrite detected: flag as protocol unknown/rewrite collision
-                pass
+            # Authoritative snapshot update (handles both append-only and non-prefix rewrites)
+            self.text_buffer = snapshot
 
         return ev
+
+    def get_terminal_event(self) -> Optional[NormalizedEvent]:
+        """Return the first terminal event if observed."""
+        terminal_types = {
+            EventType.RUN_COMPLETED,
+            EventType.RUN_FAILED,
+            EventType.CANCELLATION_CONFIRMED,
+            EventType.PROTOCOL_UNKNOWN,
+        }
+        for ev in self.events:
+            if ev.event_type in terminal_types:
+                return ev
+        return None
 
     def validate_append_only(self, snapshot: str) -> bool:
         """Check if snapshot is append-only relative to buffer."""

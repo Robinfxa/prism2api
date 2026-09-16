@@ -1,7 +1,7 @@
 """API Schemas for Native and OpenAI-compatible endpoints for M01."""
 
 from typing import List, Optional, Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from prism2api.runtime.context import ContextPolicy
 
 
@@ -32,6 +32,10 @@ class ChatCompletionRequest(BaseModel):
     top_p: Optional[float] = None
     n: Optional[int] = 1
     stream: Optional[bool] = False
+    tools: Optional[List[Dict[str, Any]]] = None
+    max_tokens: Optional[int] = None
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class ChatChoiceMessage(BaseModel):

@@ -111,11 +111,29 @@ def create_app(settings: Optional[Settings] = None, supervisor: Optional[RunSupe
 
     @app.post("/v1/chat/completions", response_model=ChatCompletionResponse)
     def create_chat_completion(req: ChatCompletionRequest):
-        # Invariant T02: Parameter rejection for unsupported parameters
+        # Pre-submit Model Validation
+        available_models = [m["id"] for m in list_models()["data"]]
+        if req.model not in available_models:
+            raise HTTPException(status_code=404, detail=f"Model '{req.model}' not found.")
+
+        # Pre-submit Parameter Validation
         if req.temperature is not None or req.top_p is not None:
             raise HTTPException(status_code=400, detail="Unsupported parameter: temperature and top_p are not supported.")
 
-        if not req.messages or req.messages[0].role != "user":
+        if req.stream:
+            raise HTTPException(status_code=400, detail="Unsupported parameter: stream=True is not supported.")
+
+        if req.n is not None and req.n != 1:
+            raise HTTPException(status_code=400, detail="Unsupported parameter: n != 1 is not supported.")
+
+        if req.tools is not None:
+            raise HTTPException(status_code=400, detail="Unsupported parameter: tools are not supported.")
+
+        if req.max_tokens is not None:
+            raise HTTPException(status_code=400, detail="Unsupported parameter: max_tokens is not supported.")
+
+        # Pre-submit Payload Validation
+        if len(req.messages) != 1 or req.messages[0].role != "user":
             raise HTTPException(status_code=400, detail="Only single user message is supported in chat-text-v1.")
 
         input_text = req.messages[0].content
@@ -140,7 +158,7 @@ def create_app(settings: Optional[Settings] = None, supervisor: Optional[RunSupe
                     finish_reason=result.finish_reason,
                 )
             ],
-            usage={"prompt_tokens": 10, "completion_tokens": 10, "total_tokens": 20},
+            usage=result.usage,
         )
 
     return app

@@ -271,14 +271,58 @@ class RunSupervisor:
             normalizer = EventNormalizer(run_id)
             events = self.adapter.observe_normalized_events(run_id, remote_handle, normalizer)
 
-            # Step 5: Finalize Generation Result & Evidence Manifest
-            final_text = normalizer.text_buffer or "Executed successfully"
+            # Step 5: Terminal Event Verification & Evidence Check
+            terminal_event = normalizer.get_terminal_event()
+            if not terminal_event:
+                raise RuntimeError(f"Run {run_id} execution ended without terminal completion event.")
+
+            if terminal_event.event_type == EventType.RUN_FAILED:
+                now = get_iso_now()
+                with self.conn:
+                    self.conn.execute(
+                        "UPDATE runs SET state = ?, updated_at = ?, state_version = state_version + 1 WHERE run_id = ?",
+                        (RunState.FAILED.value, now, run_id),
+                    )
+                raise RuntimeError(f"Run {run_id} remote execution failed.")
+
+            if terminal_event.event_type == EventType.CANCELLATION_CONFIRMED:
+                now = get_iso_now()
+                with self.conn:
+                    self.conn.execute(
+                        "UPDATE runs SET state = ?, updated_at = ?, state_version = state_version + 1 WHERE run_id = ?",
+                        (RunState.CANCELLED.value, now, run_id),
+                    )
+                raise RuntimeError(f"Run {run_id} execution cancelled.")
+
+            if terminal_event.event_type == EventType.PROTOCOL_UNKNOWN:
+                now = get_iso_now()
+                with self.conn:
+                    self.conn.execute(
+                        "UPDATE runs SET state = ?, updated_at = ?, state_version = state_version + 1 WHERE run_id = ?",
+                        (RunState.UNCERTAIN.value, now, run_id),
+                    )
+                raise RuntimeError(f"Run {run_id} protocol unknown terminal event.")
+
+            if terminal_event.event_type != EventType.RUN_COMPLETED:
+                raise RuntimeError(f"Run {run_id} invalid terminal event type: {terminal_event.event_type}")
+
+            # Step 6: Finalize Generation Result & Evidence Manifest for SUCCEEDED run
+            final_text = terminal_event.payload.get("text") or normalizer.text_buffer
+            finish_reason = terminal_event.payload.get("finish_reason", "stop")
+
+            # Provider model confirmation only if present in evidence
+            provider_model_id = None
+            for ev in normalizer.events:
+                if "provider_model_id_confirmed" in ev.payload:
+                    provider_model_id = ev.payload["provider_model_id_confirmed"]
+                    break
+
             result = GenerationResult(
                 run_id=run_id,
                 requested_alias=model_alias,
-                provider_model_id_confirmed="prism-v1-confirmed",
+                provider_model_id_confirmed=provider_model_id,
                 text=final_text,
-                finish_reason="stop",
+                finish_reason=finish_reason,
                 context_ref=record.context_ref,
             )
 
@@ -286,12 +330,12 @@ class RunSupervisor:
                 run_id=run_id,
                 request_fingerprint=record.request_fingerprint,
                 requested_alias=model_alias,
+                completion_evidence=terminal_event.model_dump(),
                 output_digest="",
                 result_ref=f"res_{run_id}",
             )
 
             res_file, man_file = self.journal.save_result_and_manifest(run_id, result, manifest)
-            result.manifest_ref = str(man_file)
 
             # Update run to SUCCEEDED
             now = get_iso_now()
@@ -314,7 +358,7 @@ class RunSupervisor:
                     """
                     UPDATE runs
                     SET state = ?, updated_at = ?, state_version = state_version + 1
-                    WHERE run_id = ?
+                    WHERE run_id = ? AND state IN ('queued', 'preparing', 'submitting', 'running')
                     """,
                     (RunState.FAILED.value, now, run_id),
                 )
