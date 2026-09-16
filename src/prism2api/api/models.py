@@ -6,7 +6,9 @@ from prism2api.runtime.context import ContextPolicy
 
 
 class NativeRunRequest(BaseModel):
-    input_text: str
+    model_config = ConfigDict(extra="forbid")
+    input_text: str = Field(min_length=1)
+    expected_context_revision: Optional[int] = Field(default=None, ge=1)
     model_alias: str = "prism-default"
     context_policy: ContextPolicy = ContextPolicy.ISOLATED
     context_id: Optional[str] = None
@@ -21,8 +23,9 @@ class NativeRunResponse(BaseModel):
 
 
 class ChatMessage(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
     role: str
-    content: str
+    content: str = Field(min_length=1)
 
 
 class ChatCompletionRequest(BaseModel):
@@ -35,7 +38,7 @@ class ChatCompletionRequest(BaseModel):
     tools: Optional[List[Dict[str, Any]]] = None
     max_tokens: Optional[int] = None
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
 
 class ChatChoiceMessage(BaseModel):

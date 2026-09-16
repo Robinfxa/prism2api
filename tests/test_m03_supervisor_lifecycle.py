@@ -12,7 +12,7 @@ from prism2api.runtime.supervisor import (
 
 @pytest.fixture
 def supervisor(tmp_path):
-    settings = Settings(home_dir=tmp_path / ".prism2api")
+    settings = Settings(home_dir=tmp_path / ".prism2api", transport_mode="mock")
     journal = StorageJournal(settings)
     return RunSupervisor(settings, journal)
 
@@ -49,7 +49,7 @@ def test_t13_idempotency_same_key_different_fingerprint(supervisor):
 
 def test_t14_intent_logged_before_dispatch_and_crash_recovery(tmp_path):
     """T14: Process crash after intent write leaves un-finalized run in UNCERTAIN state."""
-    settings = Settings(home_dir=tmp_path / ".prism2api")
+    settings = Settings(home_dir=tmp_path / ".prism2api", transport_mode="mock")
     journal1 = StorageJournal(settings)
     sup1 = RunSupervisor(settings, journal1)
 

@@ -2,6 +2,9 @@
 
 import json
 import hashlib
+import hmac
+import tempfile
+from prism2api.runtime.locking import HomeLock
 import os
 import time
 from datetime import datetime, timezone
@@ -29,6 +32,26 @@ def sanitize_text(text: str) -> str:
     text = re.sub(r"(sk-[A-Za-z0-9_-]{20,})", r"[REDACTED_API_KEY]", text)
     text = re.sub(r"(gh[pousr]_[A-Za-z0-9]{20,})", r"[REDACTED_GITHUB_TOKEN]", text)
     return text
+
+
+def atomic_json(path: Path, data):
+    """fsync the file and directory; publication to SQL occurs separately."""
+    fd, tmp = tempfile.mkstemp(prefix=".pending-", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            json.dump(data, stream, ensure_ascii=False, indent=2, allow_nan=False)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(tmp, path)
+        if os.name == "posix":
+            dfd = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(dfd)
+            finally:
+                os.close(dfd)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
 
 
 class EvidenceManifest(BaseModel):
@@ -63,6 +86,7 @@ class GenerationResult(BaseModel):
     context_ref: Optional[str] = None
     manifest_ref: Optional[str] = None
     result_digest: str = ""
+    transport_kind: str = "unknown"
 
     def compute_digest(self) -> str:
         """Compute SHA-256 digest of normalized result text."""
@@ -75,13 +99,24 @@ class StorageJournal:
     def __init__(self, settings: Settings):
         self.settings = settings
         self.settings.ensure_directories()
-        self.conn = get_db_connection(self.settings.db_path)
-        init_db_schema(self.conn)
+        self._home_lock = HomeLock(self.settings.lock_file_path)
+        self.closed = False
+        self.owner = None
+        try:
+            self.settings.load_local_secrets()
+            self.conn = get_db_connection(self.settings.db_path)
+            self.lock = self.conn.lock
+            init_db_schema(self.conn)
+        except BaseException:
+            if getattr(self, "conn", None) is not None:
+                self.conn.close()
+            self._home_lock.close()
+            raise
 
     def compute_fingerprint(self, input_data: str, model_alias: str, context_policy: str) -> str:
         """Compute salted SHA-256 request fingerprint."""
-        raw = f"{self.settings.secret_salt}:{model_alias}:{context_policy}:{input_data}"
-        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+        raw = json.dumps([input_data, model_alias, context_policy], ensure_ascii=False, separators=(",", ":"))
+        return hmac.new(self.settings.secret_salt.encode(), raw.encode(), hashlib.sha256).hexdigest()
 
     def save_result_and_manifest(
         self,
@@ -105,13 +140,11 @@ class StorageJournal:
         # Write result file
         res_tmp = self.settings.results_dir / f"{run_id}.tmp"
         res_final = self.settings.results_dir / f"{run_id}.json"
-        res_tmp.write_text(result.model_dump_json(indent=2), encoding="utf-8")
-        os.replace(res_tmp, res_final)
+        atomic_json(res_final, result.model_dump(mode="json"))
 
         # Write manifest file
         man_tmp = self.settings.evidence_dir / f"{run_id}.tmp"
-        man_tmp.write_text(manifest.model_dump_json(indent=2), encoding="utf-8")
-        os.replace(man_tmp, man_final)
+        atomic_json(man_final, manifest.model_dump(mode="json"))
 
         result_id = f"res_{run_id}"
         with self.conn:
@@ -136,4 +169,11 @@ class StorageJournal:
 
     def close(self) -> None:
         """Close SQLite database connection."""
-        self.conn.close()
+        if self.closed:
+            return
+        if self.owner is not None:
+            self.owner.close()  # A stuck worker must NOT release this process's lock.
+        with self.lock:
+            self.conn.close()
+            self.closed = True
+            self._home_lock.close()

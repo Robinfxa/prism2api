@@ -32,10 +32,34 @@ class TransportSession(BaseModel):
     auth_profile_id: str
     browser_generation: int = 1
     is_active: bool = True
+    context_binding: Dict[str, Any] = Field(default_factory=dict)
+    operation_id: Optional[str] = None
+    deadline_monotonic: Optional[float] = None
+    io_timeout_seconds: Optional[float] = None
 
 
 class BaseTransport(ABC):
-    """Abstract base class for all Prism transport layers."""
+    """Adapter seam, not Prism's wire schema.
+
+    Each network operation MUST bound its own blocking I/O using the supplied
+    session/deadline budget. observe_events must yield periodically and stop at
+    an evidenced terminal; never aggregate an unbounded upstream response.
+    No internal retries of prepare/submit. Cancellation receipt != confirmation.
+    """
+    kind = "live"
+    handle_scoped_events = False
+
+    def prepare_context(self, session, context, operation_id):
+        """Create/inspect ONLY the authorized binding; return observed identifiers."""
+        raise NotImplementedError("Context preparation needs verified protocol evidence")
+
+    def lookup_events(self, session, handle):
+        """Read-only lookup for exactly this task; must never submit or create resources."""
+        raise NotImplementedError("Read-only task lookup is not implemented")
+
+    def close(self):
+        """Close only resources owned by this transport instance."""
+        return None
 
     @abstractmethod
     def inspect_capabilities(self, session: TransportSession) -> List[CapabilitySnapshot]:

@@ -14,13 +14,15 @@ def test_settings(tmp_path):
         home_dir=tmp_path / ".prism2api",
         api_key="test-secret-key",
         loopback_only=True,
+        transport_mode="mock",
     )
 
 
 @pytest.fixture
 def client(test_settings):
     app = create_app(test_settings)
-    return TestClient(app)
+    with TestClient(app) as client:
+        yield client
 
 
 def test_t01_unauthenticated_request_returns_401(client):

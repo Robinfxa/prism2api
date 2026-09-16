@@ -1,6 +1,7 @@
 """Capability and Provider models for M02 Adapter."""
 
 from enum import Enum
+from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 
@@ -47,6 +48,12 @@ class CapabilitySnapshot(BaseModel):
     @property
     def is_usable(self) -> bool:
         """Capability is usable if verified and enabled with no quarantine."""
+        if self.review_due_at is not None:
+            try:
+                if datetime.fromisoformat(self.review_due_at).astimezone(timezone.utc) <= datetime.now(timezone.utc):
+                    return False
+            except (ValueError, TypeError):
+                return False
         return (
             self.evidence_state == EvidenceState.VERIFIED
             and self.activation_state == ActivationState.ENABLED

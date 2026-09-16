@@ -87,6 +87,34 @@ class ContextManager:
             )
         return binding
 
+    def get_context(self, context_id, principal_id=None, auth_profile_id=None):
+        with self.conn:
+            row = self.conn.execute("SELECT * FROM contexts WHERE context_id=?", (context_id,)).fetchone()
+        if row is None or (principal_id is not None and row["principal_id"] != principal_id) or (
+            auth_profile_id is not None and row["auth_profile_id"] != auth_profile_id
+        ):
+            raise KeyError("Context not found")
+        data = dict(row)
+        data["policy"] = data.pop("context_policy")
+        return ContextBinding(context_policy=data.pop("policy"), **data)
+
+    def assert_lease(self, lease):
+        binding = self.get_context(lease.context_id)
+        if not lease.is_active or binding.busy_run_id != lease.run_id or binding.lease_epoch != lease.owner_epoch:
+            raise ContextBusyError("Stale context lease")
+        return binding
+
+    def bind_remote(self, lease, handle):
+        with self.conn:
+            current = self.assert_lease(lease)
+            for key in ("workspace_ref", "conversation_ref"):
+                old, new = getattr(current, key), getattr(handle, key)
+                if old is not None and old != new:
+                    raise ContextBusyError("Remote context identity changed")
+            self.conn.execute("UPDATE contexts SET workspace_ref=?, conversation_ref=? WHERE context_id=?",
+                              (handle.workspace_ref, handle.conversation_ref, lease.context_id))
+        return self.get_context(lease.context_id)
+
     def acquire_lease(self, context_id: str, run_id: str) -> ResourceLease:
         """Acquire single-owner resource lease using compare-and-swap."""
         cursor = self.conn.cursor()

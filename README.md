@@ -1,30 +1,50 @@
 # prism2api
 
-**Prism 网页工作区 → 可验证的 Python 客户端与本地 API。**
+**0.1.1 · 离线核心已验证，真实 Prism transport 尚未实现／验证。**
 
-当前交付：**架构书 v0.1.0 / 完整评审初稿 / 2026-09-16**。
+独立 Python SDK 与仅本机开放的文本 API。默认 `unconfigured`：模型列表为空，真实生成请求拒绝；只有显式 `--mock` 才启用合成测试，不把模拟响应包装成 Prism 回答。
 
-这不是已可运行的软件发行版。本包没有实现 Prism transport，没有登录或调用用户账号，没有验证模型身份、额度、上游协议或客户端兼容性，也没有启用开发工作流。
+## 安装和验证
 
-## 阅读入口
+支持范围：Python ≥3.12，POSIX（macOS/Linux）。本次实际验证 Linux/Python 3.13.5；macOS 与 Python 3.12 留作本地矩阵验证。Windows 暂不支持运行目录锁。
 
-| 入口 | 内容 |
-|---|---|
-| [架构总设计书](docs/architecture/00-master-design-book.md) | 北极星、范围、不变量、构件关系与阅读路由 |
-| [模块细稿](docs/architecture/appendices/a4-contract-index.md) | 8 个模块的字段、生命周期、失败与验收合同索引 |
-| [参考项目借鉴矩阵](docs/architecture/appendices/a1-borrow-matrix.md) | ValueHermes 与五个 xx2api 项目的继承／改造／放弃 |
-| [证据与待验证事项](docs/architecture/appendices/a2-evidence-and-open-questions.md) | 事实、设计、假设分离；协议未知项与开闸要求 |
-| [首阶段 Director Plan](docs/plans/active/architecture-and-protocol-readiness-prb.md) | 已交付文档与尚未批准的实施切片 |
-| [项目 Overlay](Agent-init/PROJECT_OVERLAY.md) | 对接上传的 Codex/GPT 工作流；不虚构已安装工具 |
-| [来源登记](docs/research/prior-art-prb/sources.md) | 上传包 SHA-256、ValueHermes 固定提交、同行资料及阅读范围 |
-| [交付说明](DELIVERY.md) | 文件范围、GitHub 写入状态、验证边界与入库方式 |
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -e '.[dev]'
+.venv/bin/python -m pytest -q
+.venv/bin/python -m prism2api smoke --mock --home /tmp/prism2api-offline-smoke
+```
 
-## 当前阶段边界
+完整运行时状态应放在仓库外。测试使用临时目录、合成数据及断网守卫；仅一个标为 `loopback` 的测试允许本机 HTTP，不允许访问 Prism。
 
-用户已授权创建架构书。**本书提出的实现选择仍待评审；架构成书不等于生产实现开闸。**
+## 本机服务
 
-仓库目标：`Robinfxa/prism2api`。连接器写入返回 `403 Resource not accessible by integration`，本包未写入远端、未创建 PR、未合并 main。
+```bash
+.venv/bin/python -m prism2api serve --mock --home "$HOME/.prism2api-mock" --port 8765
+```
 
-项目是独立 gateway，不是 ValueHermes 插件、投研系统或统一多供应商平台。Hermes/Oak/ValueHermes 只是后续候选调用方。
+启动后在 `$HOME/.prism2api-mock/credentials/gateway.key` 生成随机调用方密钥；也可显式配置 `PRISM2API_KEY`。不把 key 输出进日志或提交进仓库。删除 `--mock` 后，未配置真实 transport 时服务不提供生成能力。
 
-本文档未为仓库选择软件许可证；复用第三方实现前应检查具体代码和依赖的许可证。访问上游服务须遵守适用授权和条款，技术可行性不代表获得许可。
+已实现：原生任务提交／查询／结果／取消意图／只读核对；单条 user 文本、非流式的 `/v1/chat/completions` 子集；嵌入式和 daemon SDK。未知参数、tools、多轮消息、流式请求均明确拒绝。模型别名 `prism-default` **不是已证实的上游模型身份**；未知用量与模型确认值保持 null／省略。
+
+## 接入真实 Prism
+
+按照 [本地对接指南](docs/guides/gemini-local-integration.md) 实现一个经真实证据验证的 `BaseTransport` 子类，以可信的本地 `module:factory(settings)` 装配：
+
+```bash
+.venv/bin/python -m prism2api serve \
+  --transport-factory prism2api.transport.prism_web:create_transport \
+  --home "$HOME/.prism2api-live" --port 8765
+```
+
+**上述 `prism_web` 是下一阶段拟议模块，当前不存在。** 不得把截图中的候选 URL、模型名称或额度说法当成已验证协议。仅在本人获授权、适用条款允许的范围验证；不绕过限流或账号安全检查。
+
+## 状态与设计
+
+- [本次完成项、验证证据与明确边界](docs/validation/offline-runtime-asf.md)
+- [运行时／transport 接口合同](docs/guides/transport-handoff.md)
+- [原架构总书](docs/architecture/00-master-design-book.md)
+- [项目 Overlay](Agent-init/PROJECT_OVERLAY.md)
+- [本次 OpenSpec change](openspec/changes/complete-offline-core-asf/proposal.md)
+
+本版不是架构书全部 52 项的产品验收。尚无真实 Prism 登录、网络协议、浏览器自动化、SSE、通用工具调用、多模态、多账号、自动清理远端项目或生产部署保证。运行中缺少结局会进入 `uncertain` 并停止新生成；必须查清旧任务，而不是清库、换运行目录或重发来绕过它。

@@ -46,7 +46,7 @@ def test_t07_adapter_blocks_unverified_capability():
 
 def test_t09_adapter_submit_no_internal_retry():
     """T09: Adapter submit invokes transport submit exactly once without auto-retry."""
-    adapter = PrismAdapter()
+    adapter = PrismAdapter(MockTransport())
     handle = adapter.submit_request(
         run_id="run_1",
         attempt_id="att_1",

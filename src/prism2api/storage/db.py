@@ -2,23 +2,63 @@
 
 import sqlite3
 from pathlib import Path
+import threading
 from typing import Optional
+
+
+class LockedConnection(sqlite3.Connection):
+    """Short, serialized SQLite transactions with correct nested savepoints."""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.lock = threading.RLock()
+        self._local = threading.local()
+
+    def __enter__(self):
+        self.lock.acquire()
+        stack = getattr(self._local, "stack", [])
+        marker = f"nested_{len(stack)}" if self.in_transaction else None
+        try:
+            self.execute(f"SAVEPOINT {marker}" if marker else "BEGIN IMMEDIATE")
+        except BaseException:
+            self.lock.release()
+            raise
+        stack.append(marker)
+        self._local.stack = stack
+        return self
+
+    def __exit__(self, typ, value, tb):
+        marker = self._local.stack.pop()
+        try:
+            if marker:
+                if typ:
+                    self.execute(f"ROLLBACK TO {marker}")
+                self.execute(f"RELEASE {marker}")
+            else:
+                try:
+                    self.execute("ROLLBACK" if typ else "COMMIT")
+                except BaseException:
+                    if self.in_transaction:
+                        self.rollback()
+                    raise
+        finally:
+            self.lock.release()
+        return False
 
 
 def get_db_connection(db_path: Path) -> sqlite3.Connection:
     """Open SQLite connection with WAL mode and busy timeout."""
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(db_path), timeout=10.0, check_same_thread=False)
+    conn = sqlite3.connect(str(db_path), timeout=10.0, check_same_thread=False, isolation_level=None, factory=LockedConnection)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode = WAL;")
-    conn.execute("PRAGMA synchronous = NORMAL;")
+    conn.execute("PRAGMA synchronous = FULL;")
     conn.execute("PRAGMA foreign_keys = ON;")
     return conn
 
 
 def init_db_schema(conn: sqlite3.Connection) -> None:
     """Create all required tables for M06 Journal."""
-    with conn:
+    with conn.lock:
         conn.executescript("""
         CREATE TABLE IF NOT EXISTS runs (
             run_id TEXT PRIMARY KEY,
@@ -127,7 +167,21 @@ def init_db_schema(conn: sqlite3.Connection) -> None:
             FOREIGN KEY (run_id) REFERENCES runs(run_id)
         );
 
+        CREATE TABLE IF NOT EXISTS request_snapshots (
+            run_id TEXT PRIMARY KEY REFERENCES runs(run_id),
+            schema_version TEXT NOT NULL,
+            input_json TEXT NOT NULL,
+            request_json TEXT NOT NULL,
+            fingerprint TEXT NOT NULL
+        );
         CREATE INDEX IF NOT EXISTS idx_runs_state ON runs(state);
         CREATE INDEX IF NOT EXISTS idx_runs_principal ON runs(principal_id);
         CREATE INDEX IF NOT EXISTS idx_idempotency_principal ON idempotency_records(principal_id);
         """)
+
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(runs)")}
+    with conn:
+        if "error_code" not in columns:
+            conn.execute("ALTER TABLE runs ADD COLUMN error_code TEXT")
+        if "cancel_dispatched" not in columns:
+            conn.execute("ALTER TABLE runs ADD COLUMN cancel_dispatched INTEGER NOT NULL DEFAULT 0")

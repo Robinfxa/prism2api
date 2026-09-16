@@ -10,7 +10,7 @@ from prism2api.runtime.context import ContextPolicy
 
 @pytest.fixture
 def env_setup(tmp_path):
-    settings = Settings(home_dir=tmp_path / ".prism2api")
+    settings = Settings(home_dir=tmp_path / ".prism2api", transport_mode="mock")
     journal = StorageJournal(settings)
     supervisor = RunSupervisor(settings, journal)
     return settings, journal, supervisor
@@ -45,7 +45,7 @@ def test_e2e_full_generation_lifecycle(env_setup):
 
 def test_sdk_embedded_submit_and_execute(tmp_path):
     """SDK embedded mode end-to-end submit and execution test."""
-    settings = Settings(home_dir=tmp_path / ".prism2api")
+    settings = Settings(home_dir=tmp_path / ".prism2api", transport_mode="mock")
     client = SDKClient(mode=ClientMode.EMBEDDED, settings=settings)
 
     try:

@@ -14,3 +14,14 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .hypothesis/
+
+# Build outputs and local execution evidence
+build/
+dist/
+*.egg-info/
+runtime.db*
+credentials/
+browser-profile/
+*.har
+cookie*.json
+storage-state*.json

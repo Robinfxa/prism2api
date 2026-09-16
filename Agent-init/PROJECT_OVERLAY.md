@@ -1,105 +1,68 @@
 # 项目 Overlay — prism2api
 
-> v0.1.0 / draft / 2026-09-16。依据用户上传 `dev-flow-GPT.zip` 的 0–12 节形态填写。当前为文档接入草稿；完整内核、skills、custom agents、hooks 和 OpenSpec 尚未安装。
->
-> **阶段开关：架构评审。** 本次授权创建文档，不自动进入真实账号探测或生产实现。运行时能力一律未验证。每节区分现有文档与计划路径。
+> 补丁阶段状态，2026-09-16。基线 `59aad2f`；本补丁依据用户“直接做完，Gemini 只做本地对接”的授权补齐离线核心。**GitHub main 未因本包而改变**，接手先核 `git status`、`git rev-parse HEAD` 与实际文件。沿用 dev-flow-GPT 路线，不安装旧 Claude IPC/hook。
 
 ## 0. 项目身份
 
-- 项目：`prism2api`；仓库目标 `Robinfxa/prism2api`。
-- 产品入口：尚无可运行 CLI/API。
-- 语言：当前中文 Markdown；拟议运行时 Python 3.12，未建立依赖锁文件。
-- codegraph：未启用，不宣称已索引；当前按精确文档路径查找。
-- 文档状态入口：[总书](../docs/architecture/00-master-design-book.md)。
+Python ≥3.12，发行版本 0.1.1。CLI=`python -m prism2api`，包配置=`pyproject.toml`。运行目标 POSIX，本轮实测 Linux/Python 3.13.5。默认 transport 未配置；mock 必须显式选择。真实 Prism 协议未验证。
 
-## 1. 入口与知识地图
+## 1. 代码入口地图
 
-| 面 | 真实文档／建议代码位置 | 状态 |
-|---|---|---|
-| 设计 | `docs/architecture/00-master-design-book.md`＋modules＋appendices | 本包已提供 |
-| 证据 | `docs/research/prior-art-prb/sources.md` | 已登记读取范围 |
-| 阶段路线 | `docs/plans/active/architecture-and-protocol-readiness-prb.md` | 待评审／实施待批 |
-| 本次文档验证 | `docs/validation/check_book.py` | 本包文档工具，非产品实现 |
-| API／SDK | 拟议 `src/prism2api/api/`、`client.py` | 尚不存在 |
-| 生成与上下文 | 拟议 `src/prism2api/runtime/` | 尚不存在 |
-| 上游适配／传输 | 拟议 `src/prism2api/provider/`、`transport/` | 尚不存在 |
-| 状态与证据 | 拟议 `src/prism2api/storage/` | 尚不存在 |
+| 面 | 位置 |
+|---|---|
+| CLI、SDK、HTTP | `src/prism2api/__main__.py`、`client.py`、`api/app.py` |
+| 唯一执行者／恢复／幂等 | `runtime/supervisor.py` |
+| 输入冻结／事务／证据 | `storage/db.py`、`storage/journal.py` |
+| 终态与归属 | `runtime/events.py`、`provider/adapter.py` |
+| 上下文／OS 锁 | `runtime/context.py`、`runtime/locking.py` |
+| 上游边界 | `transport/base.py`、`unconfigured.py`、`mock_transport.py` |
 
 ## 2. 设计圣经
 
-[总书](../docs/architecture/00-master-design-book.md) 管全局；[A4](../docs/architecture/appendices/a4-contract-index.md) 路由到字段 owner。核心读序：总书 §03/§07 → M03/M04 → 本切片模块。来源／未决查 A1/A2，未来 change 不自行扩大事实或写权。
-
-所有章节当前 draft，未获用户终审。更新长期意图，不把任务日志与原始测试输出塞进架构正文。重大取舍见 A5；ADR 按需创建。
+`docs/architecture/00-master-design-book.md` 与 A4 合同索引保留。下一阶段重点 M02/M03/M04/M05/M07；架构目标不等于当前能力。实际本地 transport 插槽合同见 `docs/guides/transport-handoff.md`。本次不重写架构书、不改变其长期安全边界。
 
 ## 3. 测试体系
 
-当前唯一实际可运行的项目级验证是文档工具：
-
 ```bash
-python docs/validation/check_book.py
+python -m pytest -q
+python -m pytest -q tests/test_terminal_contract.py tests/test_audit_regressions.py
+python -m pytest -q tests/test_runtime_readiness.py
 ```
 
-产品 tier-1／tier-2：**尚未建立**，passed-count unknown。未来候选命令及 offline/live 边界见 M08，不将其复制成已执行基线。DL_PY、DL_TEST_CMD、DL_SUMMARY_RE、DL_PASS_RE、DL_FAIL_RE、DL_REMOTE、DL_BRANCH 必须在真实初始化后按项目环境设置；当前不生成虚假的 driver.env。
-
-敏感／ambient 边界至少覆盖 `.multi-subflow/`、reference clones、凭证、浏览器 profile、原始 HAR、真实账号材料和运行数据库。offline 测试必须主动阻断网络，不能依赖没有配置凭证的偶然失败。
-
-passed-count gate 只作卫生检查，真实 byte-identical 另需 bytes／digest 证据；这是本项目补强，详见 M08 §6。
+本次 103 passed 是附件所列版本下的运行证据，未来按真实命令更新，不能把计数当全部合同覆盖率。`tests/conftest.py` 默认封锁网络及外部 DNS，清除 ambient PRISM2API 环境变量；只有 loopback 标记允许本机 socket。真实账号调用不得进入默认测试。
 
 ## 4. Spec 工具
 
-拟用 OpenSpec，但当前未初始化。首次行为实现前完成工具版本与 artifact gate。当前只有设计与阶段计划，没有 live capability spec。
-
-未来 change 路径 `openspec/changes/<slug>-<sid>/`；capability spec `openspec/specs/**` 只经 archive 合并，禁止直接编辑。纯文档校验不伪造 OpenSpec validate 成功。
+仓库已有 OpenSpec；本次新增 `openspec/changes/complete-offline-core-asf/`。本环境没有 OpenSpec CLI，未宣称 validate/archive 已执行。任务、设计、delta、验证正文完整提供；本地先 `openspec validate complete-offline-core-asf --strict`，验证通过后经用户确认归档，禁止直接修改 `openspec/specs/**` 或篡改历史归档。
 
 ## 5. 项目铁律
 
-不变量正文只在总书 §03（I01–I12），本节为必要索引：
+已接受输入不可在执行时替换；提交意图后不确定不重发；明确终态也要核对任务归属与冲突；没有可校验结果不能报成功；未知模型／用量不能编造；SDK 与 HTTP 共用同一运行目录写入者；精确资源归属；凭证／原始 HAR／真实论文不进仓库。
 
-- 未证实的端点／模型／额度不得编造，M02/A2。
-- 上下文隔离与精确 owner，M04。
-- submit intent 后 uncertain 不重发，M03。
-- 真终态＋完整结果＋持久化后才成功，M05/M06。
-- 不支持的角色／tools／参数明确拒绝，M01。
-- 只清理精确归属资源，不碰日用浏览器／真实论文，M04/M07。
-- 凭证、原始流量和真实输入不进仓库，M06/M07。
-- 设计通过、离线通过、实测通过与客户端合格分开，M08。
+## 6. 写入边界
 
-所有数值预算待配置与实测标定；单账号／单进程／单生成 worker 是本书拟议结构选择，不是上游限制数字。
+本次获批核心修复：生产代码、测试、pyproject、保护性 gitignore、README、Overlay、新 change 与验证／对接指南。下一阶段 Gemini 只实现基于证据的 live transport、对应解析测试和本地集成记录；若发现确需改共享核心合同，停下给出最小冲突证据，不批量重写已通过实现。
 
-## 6. 角色写入边界
+## 7. Git / Ops
 
-当前仅文档态：允许 `README.md`、`DELIVERY.md`、`docs/**`、本 Overlay 与保护性 `.gitignore`。文档检查脚本属于验证工具，不含 runtime 实现。
+GitHub connector 写分支返回 403；交付应用补丁，非远端提交。只在基线及触及文件校验通过后应用；不覆盖 WIP、不 reset/stash/force push、不 `git add -A`，merge main 仍须用户明确同意。
 
-未来 arc-imp 仅获批 change 的 artifacts、代码与测试；Researcher 只写 research；Validation 只写证据与有界 audit；Ops 执行获批 git；Director 决策与阶段计划。当前禁止擅写 `src/`、runtime tests、真实 `.env`、credentials、browser profile 与 `openspec/specs/`。
+## 8. 外部研究
 
-## 7. git / Ops 约束
-
-当前 GitHub 写操作实际返回 403，未 push、未建 PR。后续先看实际树再导入文档，不覆盖用户新增内容。
-
-建议独立文档分支 `docs/architecture-v0.1`；merge main 需用户明确指令。不 `git add -A`、不 force push、不 `--no-verify`，只暂存本次允许路径。提交归属按本机工作流配置，本包不伪造作者或 Co-Authored-By。
-
-## 8. 延伸研究
-
-[来源包](../docs/research/prior-art-prb/README.md) 为当前入口；本包没有 clone 同行源码到 reference。修改模块时按 source ID 与 tag 精读，不能把整片参考资料设为每次必读。
-
-[A1](../docs/architecture/appendices/a1-borrow-matrix.md) 为唯一采纳矩阵；实际代码状态均未 borrow。
+保留 `docs/research/prior-art-prb/` 与 A1。新抓包是取证，不是竞品 README；只将相关协议材料纳入本地研究。旧两个同名无关仓库已略过，不新增平台／计费后台。
 
 ## 9. 北极星
 
-可验证、可隔离、可恢复的 Prism 接入；本地优先但明确云端外发；可信失败优于伪成功。不是免费无限量模型获取器，不做多账号轮换或限流绕过。
+可信、隔离、可恢复的 Prism 接入。离线通过不等于联网通过；本地运行不等于不上云。不是额度绕过或多账号轮换工具。
 
-## 10. 角色模型分配
+## 10. 执行模型
 
-尚未为本项目配置具体模型标识。上传模板中的 opus/sonnet 是模板项，不能当作当前 GPT 运行时有效值；也不从聊天记忆自动写入新的模型组合。首次安装时沿用用户明确有效的本机配置，本书不更改模型矩阵。
+用户本机当前使用 Gemini；不要求新增模型或改写角色矩阵。代码与审核依靠明确合同、测试、源文件证据，不依靠模型自报完成。
 
-## 11. 状态外置
+## 11. 当前事实入口
 
-后续进入真实仓库时看 `git status`、`git log`、active plan、`openspec list`（工具存在时），不把本包描述当仓库实时事实。未初始化工具返回缺失不能解释为“零 active changes 已核实”。
+`git log/status`、本次 change 的 `verification.md`、`docs/validation/offline-runtime-asf.md`。原 active architecture plan 是历史设计排期，当前实施入口为本次完成记录与 Gemini 本地对接指南，不把旧“尚无代码”快照作为当前事实。
 
-本次证据：[文档验证报告](../docs/validation/architecture-book-prb-report.md)。MEMORY 尚未创建，未来只留索引／教训。文档包标签 prb 不等于已注册远端 sid。
+## 12. 工作流集成
 
-## 12. Codex 特化 / Hooks
-
-目标形态依据 GPT 包：`AGENTS.md`、`Agent-init/`、`.agents/skills/`、`.codex/agents/`。本次仅提供项目 Overlay，不声称这些入口已安装或能在本会话运行。
-
-hooks 不启用；以后只做确定性 guardrail，不替代 review、OpenSpec 或运行证据。GPT 路线不使用旧 Claude 文件锁／母体协议。安装脚本的覆盖行为需先审 diff；本次不执行安装。
+沿用已有 GPT 工作流文件；不自动安装 custom agents、skills、hooks、全局规则或新模型。文档按需读取；本次“离线核心完成”不自动打开真实账号测试或整本架构未来功能。
