@@ -1,0 +1,20 @@
+{
+  "scope": "architecture-document-structure-only",
+  "status": "pass",
+  "markdown_files": 23,
+  "module_documents": 8,
+  "appendix_documents": 5,
+  "local_links_checked": 93,
+  "balanced_fenced_blocks": 11,
+  "canonical_ids_checked": {
+    "I": 12,
+    "U": 15,
+    "T": 52,
+    "D": 14
+  },
+  "source_anchors_checked": 13,
+  "network_requests": 0,
+  "runtime_tests_executed": false,
+  "independent_architecture_audit": false,
+  "errors": []
+}

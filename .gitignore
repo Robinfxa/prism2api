@@ -1,0 +1,10 @@
+# System & OS
+.DS_Store
+
+# Ignore all dot-files and dot-directories (except .gitignore)
+.*
+!.gitignore
+
+# Ignore Agent workflow entry rules
+AGENTS.md
+AGENTS.kernel.md
