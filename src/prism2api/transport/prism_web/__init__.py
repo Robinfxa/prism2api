@@ -2,6 +2,7 @@
 
 from prism2api.transport.prism_web.protocol import PrismStartRequest, PrismStatusRequest
 from prism2api.transport.prism_web.parser import PrismWireParser
+from prism2api.transport.prism_web.live_profile import PrismLiveProfile
 from prism2api.transport.prism_web.transport import (
     PrismWebTransport,
     PrismSessionManager,
@@ -17,6 +18,7 @@ __all__ = [
     "PrismStartRequest",
     "PrismStatusRequest",
     "PrismWireParser",
+    "PrismLiveProfile",
     "PrismWebTransport",
     "PrismSessionManager",
     "PrismContextManager",
@@ -27,6 +29,7 @@ __all__ = [
     "PrismHttpTransport",
     "create_prism_http_transport",
 ]
+
 
 
 

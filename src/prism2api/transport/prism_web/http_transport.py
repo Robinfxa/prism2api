@@ -22,6 +22,7 @@ from prism2api.transport.base import (
 )
 from prism2api.transport.prism_web.parser import PrismWireParser
 from prism2api.transport.prism_web.protocol import PrismStartRequest, PrismStartMetadata, PrismMessage, PrismMessageContent
+from prism2api.transport.prism_web.live_profile import PrismLiveProfile
 from prism2api.errors import AdmissionBlockedError, ProtocolError
 
 
@@ -40,27 +41,37 @@ class PrismHttpTransport(BaseTransport):
         )
         self.parser = PrismWireParser()
         self.cookie_header: Optional[str] = None
+        self.live_profile: Optional[PrismLiveProfile] = None
         self._load_credentials()
 
     def _load_credentials(self) -> None:
-        """Locate credentials from credential_locator, environment, or $HOME/.prism2api/credentials.json."""
-        locator_path = None
-        if self._auth_profile.credential_locator:
-            locator_path = Path(self._auth_profile.credential_locator)
-        else:
-            default_path = Path.home() / ".prism2api" / "credentials.json"
-            if default_path.exists():
-                locator_path = default_path
+        """Locate live profile / credentials from PrismLiveProfile or credential_locator."""
+        try:
+            self.live_profile = PrismLiveProfile.load()
+            if self.live_profile.cookie_header:
+                self.cookie_header = self.live_profile.cookie_header
+                self._auth_profile.auth_status = AuthStatus.READY
+        except AdmissionBlockedError:
+            pass
 
-        if locator_path and locator_path.exists():
-            try:
-                with open(locator_path, "r", encoding="utf-8") as f:
-                    cred_data = json.load(f)
-                    self.cookie_header = cred_data.get("cookie")
-                    if self.cookie_header:
-                        self._auth_profile.auth_status = AuthStatus.READY
-            except Exception:
-                pass
+        if not self.cookie_header:
+            locator_path = None
+            if self._auth_profile.credential_locator:
+                locator_path = Path(self._auth_profile.credential_locator)
+            else:
+                default_path = Path.home() / ".prism2api" / "credentials.json"
+                if default_path.exists():
+                    locator_path = default_path
+
+            if locator_path and locator_path.exists():
+                try:
+                    with open(locator_path, "r", encoding="utf-8") as f:
+                        cred_data = json.load(f)
+                        self.cookie_header = cred_data.get("cookie")
+                        if self.cookie_header:
+                            self._auth_profile.auth_status = AuthStatus.READY
+                except Exception:
+                    pass
 
         if not self.cookie_header:
             env_cookie = os.getenv("PRISM_COOKIE") or os.getenv("PRISM_SESSION_COOKIE")
@@ -129,7 +140,9 @@ class PrismHttpTransport(BaseTransport):
         return RemoteHandle(
             workspace_ref=workspace_ref,
             conversation_ref=conversation_ref,
-            task_ref=f"task_{operation_id}",
+            task_ref=None,
+            message_ref=None,
+            server_event_cursor=None,
         )
 
     def submit(
@@ -157,15 +170,16 @@ class PrismHttpTransport(BaseTransport):
 
         project_id = session.context_binding.get("workspace_ref") or session.context_binding.get("project_id")
         conversation_id = session.context_binding.get("conversation_ref") or session.context_binding.get("conversation_id")
-        user_id = session.context_binding.get("user_id")
+        
+        if not project_id or not conversation_id:
+            raise AdmissionBlockedError("Missing required live context identity (workspace_ref/project_id or conversation_ref/conversation_id)")
 
-        if not project_id or not conversation_id or not user_id:
-            raise AdmissionBlockedError("Missing required live context identity (workspace_ref/project_id, conversation_ref/conversation_id, or user_id)")
+        user_id = self.live_profile.user_id if self.live_profile else session.context_binding.get("user_id")
+        sb_url = self.live_profile.sandbox_url if self.live_profile else session.context_binding.get("sandbox_url")
+        sb_token = self.live_profile.sandbox_token if self.live_profile else session.context_binding.get("sandbox_token")
 
-        sb_url = session.context_binding.get("sandbox_url")
-        sb_token = session.context_binding.get("sandbox_token")
-        if not sb_url or not sb_token:
-            raise AdmissionBlockedError("Missing required live context sandbox material (sandbox_url or sandbox_token)")
+        if not user_id or not sb_url or not sb_token:
+            raise AdmissionBlockedError("Missing required PrismLiveProfile credentials (user_id, sandbox_url, or sandbox_token)")
 
         url = f"{self.base_url}/api/llm/response_with_tools_start"
         headers = {
@@ -228,8 +242,8 @@ class PrismHttpTransport(BaseTransport):
             workspace_ref=project_id,
             conversation_ref=conversation_id,
             task_ref=task_id,
-            message_ref=f"msg_{attempt_id}",
-            server_event_cursor="seq_0",
+            message_ref=None,
+            server_event_cursor=None,
             raw_metadata=raw_meta,
         )
 
@@ -297,17 +311,32 @@ class PrismHttpTransport(BaseTransport):
     def _validate_status_identity(self, res_data: Dict[str, Any], handle: RemoteHandle, turn_state: Dict[str, Any]) -> None:
         """Strictly validate identity parameters in status response."""
         res_req_id = res_data.get("request_id")
-        if res_req_id and handle.task_ref and res_req_id != handle.task_ref:
+        if not res_req_id:
+            raise ProtocolError("Missing required request_id in status response")
+        if handle.task_ref and res_req_id != handle.task_ref:
             raise ProtocolError(f"Identity mismatch in status response: request_id '{res_req_id}' != expected '{handle.task_ref}'")
 
         expected_async_job_id = turn_state.get("async_job_id")
-        res_async_job_id = res_data.get("codex_async_job_id") or res_data.get("async_job_id")
-        if res_async_job_id and expected_async_job_id and res_async_job_id != expected_async_job_id:
-            raise ProtocolError(f"Identity mismatch in status response: codex_async_job_id '{res_async_job_id}' != expected '{expected_async_job_id}'")
+        if expected_async_job_id:
+            res_async_job_id = res_data.get("codex_async_job_id") or res_data.get("async_job_id")
+            if not res_async_job_id or res_async_job_id != expected_async_job_id:
+                raise ProtocolError(
+                    f"Identity mismatch in status response: codex_async_job_id '{res_async_job_id}' != expected '{expected_async_job_id}'"
+                )
 
-        res_conv_id = res_data.get("conversationId") or res_data.get("conversation_id")
-        if res_conv_id and handle.conversation_ref and res_conv_id != handle.conversation_ref:
-            raise ProtocolError(f"Identity mismatch in status response: conversationId '{res_conv_id}' != expected '{handle.conversation_ref}'")
+        if handle.conversation_ref:
+            root_conv_id = res_data.get("conversationId") or res_data.get("conversation_id")
+            nested_payload = res_data.get("response", {}).get("payload", {}) if isinstance(res_data.get("response"), dict) else {}
+            nested_conv_id = nested_payload.get("conversationId") or nested_payload.get("conversation_id")
+
+            if root_conv_id and root_conv_id != handle.conversation_ref:
+                raise ProtocolError(
+                    f"Identity mismatch in root status response: conversationId '{root_conv_id}' != expected '{handle.conversation_ref}'"
+                )
+            if nested_conv_id and nested_conv_id != handle.conversation_ref:
+                raise ProtocolError(
+                    f"Identity mismatch in nested status payload: conversationId '{nested_conv_id}' != expected '{handle.conversation_ref}'"
+                )
 
     def lookup_events(self, session: TransportSession, handle: RemoteHandle) -> Dict[str, Any]:
         """Read-only lookup for task status on prism.openai.com."""
@@ -326,4 +355,5 @@ class PrismHttpTransport(BaseTransport):
 def create_prism_http_transport(auth_profile: Optional[AuthProfile] = None, settings: Optional[Any] = None) -> PrismHttpTransport:
     """Factory function for PrismHttpTransport."""
     return PrismHttpTransport(auth_profile=auth_profile)
+
 

@@ -65,7 +65,7 @@ def test_missing_context_raises_admission_blocked():
     with pytest.raises(AdmissionBlockedError, match="Missing required live context identity"):
         transport.submit("r1", "att1", session, "hello", "prism-default")
 
-    # Incomplete context (missing sandbox material)
+    # Incomplete context (missing sandbox material / PrismLiveProfile)
     session2 = TransportSession(
         session_id="s2",
         auth_profile_id="p1",
@@ -75,8 +75,23 @@ def test_missing_context_raises_admission_blocked():
             "user_id": "user_fix_1",
         }
     )
-    with pytest.raises(AdmissionBlockedError, match="Missing required live context sandbox material"):
+    with pytest.raises(AdmissionBlockedError, match="Missing required PrismLiveProfile credentials"):
         transport.submit("r1", "att1", session2, "hello", "prism-default")
+
+
+
+def test_prepare_context_purity():
+    """Verify prepare_context returns RemoteHandle with task_ref=None, message_ref=None, server_event_cursor=None."""
+    auth = AuthProfile(profile_id="p1", auth_status=AuthStatus.READY)
+    transport = PrismHttpTransport(auth_profile=auth)
+    session = TransportSession(session_id="s1", auth_profile_id="p1")
+
+    handle = transport.prepare_context(session, {"workspace_ref": "proj_1", "conversation_ref": "cdx_1"}, "op_1")
+    assert handle.workspace_ref == "proj_1"
+    assert handle.conversation_ref == "cdx_1"
+    assert handle.task_ref is None
+    assert handle.message_ref is None
+    assert handle.server_event_cursor is None
 
 
 def test_prism_http_transport_submit_and_observe_mocked():
@@ -101,6 +116,7 @@ def test_prism_http_transport_submit_and_observe_mocked():
                     "response": {
                         "status": "success",
                         "payload": {
+                            "conversationId": "cdx1_fixture_001",
                             "output": [
                                 {
                                     "content": [
@@ -146,6 +162,8 @@ def test_prism_http_transport_submit_and_observe_mocked():
         )
 
         assert handle.task_ref == "job_999"
+        assert handle.message_ref is None
+        assert handle.server_event_cursor is None
         assert "turn_state" in handle.raw_metadata
 
         events = transport.observe_events(handle)
@@ -195,4 +213,43 @@ def test_status_identity_mismatch_raises_protocol_error():
             transport.observe_events(handle)
     finally:
         httpx.Client = original_client
+
+
+def test_status_missing_request_id_raises_protocol_error():
+    """Verify status response missing request_id raises ProtocolError."""
+    def mock_handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "status": "completed",
+                "codex_async_job_id": "job_999",
+                "conversationId": "cdx1_fixture_001",
+                "response": {"status": "success", "payload": {"output": []}}
+            }
+        )
+
+    auth = AuthProfile(profile_id="p1", auth_status=AuthStatus.READY)
+    transport = PrismHttpTransport(auth_profile=auth)
+    transport.cookie_header = "prism_session_token=valid"
+
+    from prism2api.provider.models import RemoteHandle
+    handle = RemoteHandle(
+        workspace_ref="proj_fixture_001",
+        conversation_ref="cdx1_fixture_001",
+        task_ref="job_999",
+        raw_metadata={"turn_state": {"async_job_id": "job_999"}}
+    )
+
+    original_client = httpx.Client
+    def custom_client(*args, **kwargs):
+        kwargs["transport"] = httpx.MockTransport(mock_handler)
+        return original_client(*args, **kwargs)
+
+    httpx.Client = custom_client
+    try:
+        with pytest.raises(ProtocolError, match="Missing required request_id in status response"):
+            transport.observe_events(handle)
+    finally:
+        httpx.Client = original_client
+
 
