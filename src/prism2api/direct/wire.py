@@ -2,7 +2,7 @@
 import json
 from .errors import DirectError
 
-PENDING = {'pending','running','in_progress','accepted','queued'}
+PENDING = {'pending', 'running', 'in_progress', 'accepted', 'queued', 'started', 'submitted', 'created', 'ok', 'success', 'start'}
 
 
 def protocol(code='wire_schema'):
