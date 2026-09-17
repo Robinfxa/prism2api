@@ -1,0 +1,32 @@
+{
+  "input": [
+    {
+      "type": "message",
+      "role": "system",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "You are ChatGPT, a helpful assistant built into the Prism online LaTeX editor."
+        }
+      ]
+    },
+    {
+      "type": "message",
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "Reply exactly: PRISM_PROBE_001"
+        }
+      ]
+    }
+  ],
+  "metadata": {
+    "projectId": "proj_fixture_001",
+    "userId": "user_fixture_001",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium",
+    "frontend_origin": "https://prism.openai.com"
+  },
+  "conversationId": "cdx1_fixture_conv_001"
+}

@@ -1,0 +1,12 @@
+{
+  "request_id": "req_fixture_001",
+  "turn_state": {
+    "version": 1,
+    "conversation_id": "cdx1_fixture_conv_001",
+    "prompt": "User request:\nReply exactly: PRISM_PROBE_001",
+    "reasoning_effort": "medium",
+    "user_id": "user_fixture_001",
+    "project_id": "proj_fixture_001",
+    "async_job_id": "14935"
+  }
+}
