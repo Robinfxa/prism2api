@@ -1,19 +1,14 @@
-"""PrismWebTransport for Prism Web Protocol (prism.openai.com).
+"""PrismWebTransport (EXPERIMENTAL / UNVERIFIED SCAFFOLD).
 
-Architecture:
-  PrismWebTransport (BaseTransport)
-    ├── auth/session     (PrismSessionManager)
-    ├── project/context  (PrismContextManager)
-    ├── submit           (PrismSubmitter)
-    ├── status/events    (PrismEventObserver & lookup)
-    └── parser           (PrismEventParser)
-               │
-               ▼
-        prism.openai.com
+IMPORTANT:
+This implementation is an unverified draft scaffold.
+Without Grade A live wire protocol evidence captured from prism.openai.com,
+all capabilities MUST remain UNKNOWN + DISABLED and submit requests MUST be rejected.
+No synthetic completion events, fake task IDs, or fake lookups are permitted.
 """
 
 import time
-from typing import List, Dict, Any, Optional, Generator
+from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, Field
 
 from prism2api.provider.models import (
@@ -32,11 +27,11 @@ from prism2api.transport.base import (
 
 
 class PrismSessionManager:
-    """Manages authentication profiles and session status for prism.openai.com."""
+    """Manages authentication profiles and session status for prism.openai.com (unverified scaffold)."""
 
     def __init__(self, auth_profile: Optional[AuthProfile] = None):
         self.auth_profile = auth_profile or AuthProfile(
-            profile_id="prism_web_default",
+            profile_id="prism_web_unverified",
             account_scope="prism_web_account",
             auth_status=AuthStatus.NOT_CONFIGURED,
         )
@@ -53,7 +48,7 @@ class PrismSessionManager:
 
 
 class PrismContextManager:
-    """Handles project/context workspace bindings and context preparation."""
+    """Handles project/context workspace bindings (unverified scaffold)."""
 
     def prepare_context(
         self,
@@ -61,19 +56,12 @@ class PrismContextManager:
         context: Dict[str, Any],
         operation_id: str,
     ) -> RemoteHandle:
-        """Prepare context and return RemoteHandle with workspace and conversation references."""
-        workspace_ref = context.get("workspace_ref") or f"ws_{operation_id}"
-        conversation_ref = context.get("conversation_ref") or f"conv_{operation_id}"
-
-        return RemoteHandle(
-            workspace_ref=workspace_ref,
-            conversation_ref=conversation_ref,
-            task_ref=f"task_prep_{operation_id}",
-        )
+        """Prepare context (unverified scaffold)."""
+        raise NotImplementedError("PrismWebTransport: Context preparation requires Grade A live protocol evidence.")
 
 
 class PrismSubmitter:
-    """Performs single generation submission attempt to Prism web endpoints."""
+    """Generation submission attempt to Prism web endpoints (unverified scaffold)."""
 
     def submit_task(
         self,
@@ -82,29 +70,13 @@ class PrismSubmitter:
         session: TransportSession,
         input_text: str,
         model_alias: str,
-        auth_ready: bool,
     ) -> RemoteHandle:
-        """Submit single generation task. Requires READY authentication."""
-        if not auth_ready:
-            raise RuntimeError("PrismWebTransport: Auth profile is not configured or not ready.")
-
-        # Check session deadline budget
-        if session.deadline_monotonic and time.monotonic() > session.deadline_monotonic:
-            raise TimeoutError("PrismWebTransport: Session deadline exceeded before submission.")
-
-        task_id = f"prism_task_{run_id}_{attempt_id}"
-        return RemoteHandle(
-            workspace_ref=session.context_binding.get("workspace_ref", f"ws_{run_id}"),
-            conversation_ref=session.context_binding.get("conversation_ref", f"conv_{run_id}"),
-            task_ref=task_id,
-            message_ref=f"msg_{attempt_id}",
-            server_event_cursor="seq_0",
-            raw_metadata={"endpoint": "/api/llm/response_with_tools_start"},
-        )
+        """Reject generation submission until Grade A live protocol evidence is collected."""
+        raise RuntimeError("PrismWebTransport: Unverified transport. Live Prism web protocol evidence required before submitting requests.")
 
 
 class PrismEventParser:
-    """Parses Prism web status payloads and maps to normalized event dictionaries."""
+    """Parses Prism web status payloads and maps to normalized event dictionaries (experimental scaffold)."""
 
     @staticmethod
     def parse_payload(raw_event: Dict[str, Any], task_ref: str) -> Dict[str, Any]:
@@ -114,7 +86,7 @@ class PrismEventParser:
         if ev_type == "SubmissionObserved":
             return {
                 "type": "SubmissionObserved",
-                "payload": {"task_ref": task_ref, "status": "accepted"},
+                "payload": {"task_ref": task_ref, "status": raw_event.get("payload", {}).get("status", "accepted")},
             }
         elif ev_type == "TextDelta":
             return {
@@ -153,37 +125,25 @@ class PrismEventParser:
 
 
 class PrismEventObserver:
-    """Observes status and streams events for Prism web tasks."""
+    """Observes status and streams events for Prism web tasks (unverified scaffold)."""
 
     def __init__(self, parser: PrismEventParser):
         self.parser = parser
 
     def observe(self, handle: RemoteHandle) -> List[Dict[str, Any]]:
-        """Observe events for handle."""
-        task_ref = handle.task_ref or "unknown_task"
-        # Event stream observation
-        raw_events = [
-            {"type": "SubmissionObserved", "payload": {"status": "accepted"}},
-            {"type": "TextDelta", "payload": {"text": ""}},
-            {"type": "RunCompleted", "payload": {"finish_reason": "stop", "text": ""}},
-        ]
-        return [self.parser.parse_payload(e, task_ref) for e in raw_events]
+        """Observation disabled without Grade A live wire protocol streams."""
+        raise RuntimeError("PrismWebTransport: Event observation requires Grade A live protocol evidence.")
 
     def lookup_task_status(self, session: TransportSession, handle: RemoteHandle) -> Dict[str, Any]:
-        """Read-only lookup for task status without creating new resources."""
-        task_ref = handle.task_ref or "unknown_task"
-        return {
-            "task_ref": task_ref,
-            "status": "completed",
-            "endpoint": "/api/llm/response_with_tools_status",
-        }
+        """Read-only lookup disabled without Grade A live wire protocol endpoints."""
+        raise NotImplementedError("PrismWebTransport: Task lookup endpoint is unverified.")
 
 
 class PrismWebTransport(BaseTransport):
-    """Transport implementation for Prism Web (prism.openai.com)."""
+    """Transport implementation for Prism Web (prism.openai.com - UNVERIFIED SCAFFOLD)."""
 
     kind = "prism_web"
-    handle_scoped_events = True
+    handle_scoped_events = False  # Set to False until handle-scoped live event streams are verified
 
     def __init__(self, auth_profile: Optional[AuthProfile] = None):
         self.session_mgr = PrismSessionManager(auth_profile)
@@ -191,41 +151,40 @@ class PrismWebTransport(BaseTransport):
         self.submitter = PrismSubmitter()
         self.parser = PrismEventParser()
         self.observer = PrismEventObserver(self.parser)
-        self.cancelled_handles: set[str] = set()
 
     @property
     def auth_profile(self) -> AuthProfile:
         return self.session_mgr.auth_profile
 
     def inspect_capabilities(self, session: TransportSession) -> List[CapabilitySnapshot]:
-        """Inspect capabilities. Default to disabled/unverified unless auth is READY."""
-        auth_ready = self.session_mgr.is_auth_ready()
-        state = EvidenceState.VERIFIED if auth_ready else EvidenceState.UNKNOWN
-        activation = ActivationState.ENABLED if auth_ready else ActivationState.DISABLED
+        """Inspect capabilities.
 
+        Without Grade A live wire protocol evidence, all capabilities MUST remain
+        UNKNOWN + DISABLED regardless of auth_profile.auth_status.
+        """
         return [
             CapabilitySnapshot(
                 capability_id=CapabilityId.TEXT_GENERATION,
-                evidence_state=state,
-                activation_state=activation,
+                evidence_state=EvidenceState.UNKNOWN,
+                activation_state=ActivationState.DISABLED,
                 account_scope=self.auth_profile.account_scope,
             ),
             CapabilitySnapshot(
                 capability_id=CapabilityId.ISOLATED_CONTEXT,
-                evidence_state=state,
-                activation_state=activation,
+                evidence_state=EvidenceState.UNKNOWN,
+                activation_state=ActivationState.DISABLED,
                 account_scope=self.auth_profile.account_scope,
             ),
             CapabilitySnapshot(
                 capability_id=CapabilityId.DELTA_STREAM,
-                evidence_state=state,
-                activation_state=activation,
+                evidence_state=EvidenceState.UNKNOWN,
+                activation_state=ActivationState.DISABLED,
                 account_scope=self.auth_profile.account_scope,
             ),
         ]
 
     def prepare_context(self, session: TransportSession, context: Dict[str, Any], operation_id: str) -> RemoteHandle:
-        """Prepare project/context workspace binding."""
+        """Prepare project/context workspace binding (unverified scaffold)."""
         return self.context_mgr.prepare_context(session, context, operation_id)
 
     def submit(
@@ -236,37 +195,25 @@ class PrismWebTransport(BaseTransport):
         input_text: str,
         model_alias: str,
     ) -> RemoteHandle:
-        """Submit single generation request to Prism web endpoint."""
+        """Reject generation submit until Grade A live protocol evidence is collected."""
         return self.submitter.submit_task(
             run_id=run_id,
             attempt_id=attempt_id,
             session=session,
             input_text=input_text,
             model_alias=model_alias,
-            auth_ready=self.session_mgr.is_auth_ready(),
         )
 
     def observe_events(self, handle: RemoteHandle) -> List[Dict[str, Any]]:
-        """Observe task status events."""
-        task_ref = handle.task_ref or "unknown"
-        if task_ref in self.cancelled_handles:
-            return [
-                {
-                    "type": "CancellationConfirmed",
-                    "payload": {"task_ref": task_ref},
-                }
-            ]
+        """Observe task status events (unverified scaffold)."""
         return self.observer.observe(handle)
 
     def lookup_events(self, session: TransportSession, handle: RemoteHandle) -> Dict[str, Any]:
-        """Read-only lookup for task status on prism.openai.com."""
+        """Read-only lookup for task status on prism.openai.com (unverified scaffold)."""
         return self.observer.lookup_task_status(session, handle)
 
     def request_cancel(self, handle: RemoteHandle) -> bool:
-        """Request precise cancellation of Prism web task."""
-        if handle.task_ref:
-            self.cancelled_handles.add(handle.task_ref)
-            return True
+        """Request cancellation (unverified scaffold). Returns False as remote endpoint is unverified."""
         return False
 
     def close(self) -> None:
@@ -275,5 +222,6 @@ class PrismWebTransport(BaseTransport):
 
 
 def create_prism_web_transport(auth_profile: Optional[AuthProfile] = None) -> PrismWebTransport:
-    """Factory function to instantiate PrismWebTransport."""
+    """Factory function to instantiate PrismWebTransport (unverified scaffold)."""
     return PrismWebTransport(auth_profile=auth_profile)
+

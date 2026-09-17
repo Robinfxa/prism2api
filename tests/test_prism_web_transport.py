@@ -24,14 +24,12 @@ def test_prism_session_manager():
     assert mgr.is_auth_ready()
 
 
-def test_prism_context_manager():
-    """Test PrismContextManager context preparation."""
+def test_prism_context_manager_unverified_blocks():
+    """Test PrismContextManager raises NotImplementedError without Grade A evidence."""
     mgr = PrismContextManager()
     session = TransportSession(session_id="s1", auth_profile_id="p1")
-    handle = mgr.prepare_context(session, {"workspace_ref": "ws_123"}, operation_id="op_1")
-
-    assert handle.workspace_ref == "ws_123"
-    assert handle.conversation_ref == "conv_op_1"
+    with pytest.raises(NotImplementedError):
+        mgr.prepare_context(session, {"workspace_ref": "ws_123"}, operation_id="op_1")
 
 
 def test_prism_event_parser():
@@ -52,16 +50,26 @@ def test_prism_event_parser():
     assert parsed_unknown["type"] == "ProtocolUnknown"
 
 
-def test_prism_web_transport_unconfigured_blocks_submit():
-    """Test PrismWebTransport blocks submission when auth status is not READY."""
-    transport = create_prism_web_transport()
-    session = TransportSession(session_id="s1", auth_profile_id="unconfigured")
+def test_prism_web_transport_demotes_capabilities_to_unknown_disabled():
+    """Test PrismWebTransport demotes capabilities to UNKNOWN + DISABLED without Grade A evidence."""
+    auth = AuthProfile(profile_id="p_ready", auth_status=AuthStatus.READY)
+    transport = create_prism_web_transport(auth_profile=auth)
+    session = TransportSession(session_id="s1", auth_profile_id="p_ready")
 
     caps = transport.inspect_capabilities(session)
     for cap in caps:
+        assert cap.evidence_state == EvidenceState.UNKNOWN
+        assert cap.activation_state == ActivationState.DISABLED
         assert not cap.is_usable
 
-    with pytest.raises(RuntimeError):
+
+def test_prism_web_transport_unverified_blocks_submit_and_observe():
+    """Test PrismWebTransport blocks submit and observe when unverified."""
+    auth = AuthProfile(profile_id="p_ready", auth_status=AuthStatus.READY)
+    transport = create_prism_web_transport(auth_profile=auth)
+    session = TransportSession(session_id="s1", auth_profile_id="p_ready")
+
+    with pytest.raises(RuntimeError, match="Unverified transport"):
         transport.submit(
             run_id="r1",
             attempt_id="att1",
@@ -70,31 +78,9 @@ def test_prism_web_transport_unconfigured_blocks_submit():
             model_alias="prism-default",
         )
 
+    with pytest.raises(RuntimeError, match="Event observation requires Grade A live protocol evidence"):
+        transport.observe_events(None)
 
-def test_prism_web_transport_ready_submit_and_observe():
-    """Test PrismWebTransport submission and event observation when auth status is READY."""
-    auth = AuthProfile(profile_id="p_ready", auth_status=AuthStatus.READY)
-    transport = create_prism_web_transport(auth_profile=auth)
-    session = TransportSession(session_id="s1", auth_profile_id="p_ready")
+    with pytest.raises(NotImplementedError, match="unverified"):
+        transport.lookup_events(session, None)
 
-    caps = transport.inspect_capabilities(session)
-    for cap in caps:
-        assert cap.is_usable
-
-    handle = transport.submit(
-        run_id="r1",
-        attempt_id="att1",
-        session=session,
-        input_text="Hello Prism Web",
-        model_alias="prism-default",
-    )
-
-    assert handle.task_ref == "prism_task_r1_att1"
-    assert handle.raw_metadata["endpoint"] == "/api/llm/response_with_tools_start"
-
-    events = transport.observe_events(handle)
-    assert len(events) > 0
-
-    lookup = transport.lookup_events(session, handle)
-    assert lookup["status"] == "completed"
-    assert lookup["endpoint"] == "/api/llm/response_with_tools_status"
