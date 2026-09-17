@@ -220,11 +220,13 @@ class PrismHttpTransport(BaseTransport):
         except ValueError as exc:
             raise ProtocolError(f"Malformed submit JSON response: {str(exc)}") from exc
 
-        task_id = res_data.get("request_id") or res_data.get("async_job_id") or res_data.get("job_id")
+        request_id = res_data.get("request_id")
         turn_state = res_data.get("turn_state")
 
-        if not task_id or not turn_state:
-            raise ProtocolError("Submit response missing required remote receipt (request_id/async_job_id or turn_state)")
+        if not request_id:
+            raise ProtocolError("Submit response missing required remote request_id")
+        if not turn_state or not isinstance(turn_state, dict):
+            raise ProtocolError("Submit response missing required remote turn_state")
 
         raw_meta = {
             "endpoint": "/api/llm/response_with_tools_start",
@@ -237,7 +239,7 @@ class PrismHttpTransport(BaseTransport):
         return RemoteHandle(
             workspace_ref=project_id,
             conversation_ref=conversation_id,
-            task_ref=task_id,
+            task_ref=request_id,
             message_ref=None,
             server_event_cursor=None,
             raw_metadata=raw_meta,

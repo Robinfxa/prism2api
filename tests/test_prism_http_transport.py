@@ -260,3 +260,64 @@ def test_status_missing_request_id_raises_protocol_error():
         httpx.Client = original_client
 
 
+def test_submit_missing_request_id_or_turn_state_raises_protocol_error():
+    """Verify submit response missing request_id or turn_state raises ProtocolError and does not fallback to async_job_id."""
+    def mock_missing_request_id(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "async_job_id": "async_job_123",
+                "turn_state": {"async_job_id": "async_job_123"}
+            }
+        )
+
+    def mock_missing_turn_state(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "request_id": "req_123",
+            }
+        )
+
+    auth = AuthProfile(profile_id="p1", auth_status=AuthStatus.READY)
+    transport = PrismHttpTransport(auth_profile=auth)
+    from prism2api.transport.prism_web.live_profile import PrismLiveProfile
+    transport.live_profile = PrismLiveProfile(
+        user_id="u1", sandbox_url="https://sb", sandbox_token="tok", cookie_header="c=1"
+    )
+    transport.cookie_header = "c=1"
+
+    session = TransportSession(
+        session_id="s1",
+        auth_profile_id="p1",
+        context_binding={"workspace_ref": "proj_1", "conversation_ref": "cdx_1"}
+    )
+
+    original_client = httpx.Client
+
+    # Test missing request_id
+    def client_missing_req_id(*args, **kwargs):
+        kwargs["transport"] = httpx.MockTransport(mock_missing_request_id)
+        return original_client(*args, **kwargs)
+
+    httpx.Client = client_missing_req_id
+    try:
+        with pytest.raises(ProtocolError, match="Submit response missing required remote request_id"):
+            transport.submit("r1", "att1", session, "hello", "prism-default")
+    finally:
+        httpx.Client = original_client
+
+    # Test missing turn_state
+    def client_missing_turn_state(*args, **kwargs):
+        kwargs["transport"] = httpx.MockTransport(mock_missing_turn_state)
+        return original_client(*args, **kwargs)
+
+    httpx.Client = client_missing_turn_state
+    try:
+        with pytest.raises(ProtocolError, match="Submit response missing required remote turn_state"):
+            transport.submit("r1", "att1", session, "hello", "prism-default")
+    finally:
+        httpx.Client = original_client
+
+
+
