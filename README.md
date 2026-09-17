@@ -6,6 +6,9 @@
 本版本（v1.0.0）主打 **Pure Direct HTTP 传输模式**，放弃 Browser 依赖，提供高性能、零浏览器开销的固定上下文 API 转换服务。
 固定共享 Chat、单并发、本地 API key；旧 browser 路径保留为历史实验，不作为 Direct HTTP 依赖。
 
+> [!IMPORTANT]
+> **免责声明 (Disclaimer)**：本项目仅供个人技术交流与研究学习参考使用，**与 OpenAI 官方无关（Not affiliated with, endorsed, or sponsored by OpenAI）**。使用本项目时请遵守相关服务条款与法律法规。
+
 ---
 
 # prism2api v1.0.0
@@ -100,3 +103,8 @@ curl http://127.0.0.1:8765/v1/chat/completions \
 - [本次 OpenSpec change](openspec/changes/archive/2026-09-16-complete-offline-core-asf/proposal.md)
 
 本版不是架构书全部 52 项的产品验收。尚无真实 Prism 登录、网络协议、浏览器自动化、SSE、通用工具调用、多模态、多账号、自动清理远端项目或生产部署保证。运行中缺少结局会进入 `uncertain` 并停止新生成；必须查清旧任务，而不是清库、换运行目录或重发来绕过它。
+
+## 许可证与免责声明 (License & Disclaimer)
+
+- 本项目遵循 [MIT License](LICENSE) 开源协议。
+- **免责声明**：本项目仅供技术交流与学术研究学习参考使用，**与 OpenAI 官方无关（Not affiliated with, endorsed, or sponsored by OpenAI）**。请使用者在合法合规及遵循相关平台服务条款的前提下自行测试。
