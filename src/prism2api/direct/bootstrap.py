@@ -40,7 +40,10 @@ def strict_json(text: str):
     try:
         return json.loads(text, object_pairs_hook=pairs, parse_constant=bad_constant)
     except (ValueError, TypeError, RecursionError):
-        raise invalid('invalid_json', 'Expected valid JSON without duplicate keys or non-finite numbers.') from None
+        try:
+            return json.loads(text, object_pairs_hook=pairs, parse_constant=bad_constant, strict=False)
+        except Exception:
+            raise invalid('invalid_json', 'Expected valid JSON without duplicate keys or non-finite numbers.') from None
 
 
 def _ansi_quotes(command: str) -> str:
@@ -51,7 +54,7 @@ def _ansi_quotes(command: str) -> str:
     """
     out, i, quote = [], 0, None
     simple = {'n': '\n', 'r': '\r', 't': '\t', 'b': '\b', 'f': '\f', 'v': '\v',
-              'a': '\a', '\\': '\\', "'": "'", '"': '"'}
+              'a': '\a', '\\': '\\', "'": "'"}
     while i < len(command):
         c = command[i]
         if quote is None and command.startswith("$'", i):
@@ -103,6 +106,8 @@ def parse_curl(text: str) -> tuple[dict, dict]:
         tokens = shlex.split(_ansi_quotes(clean), comments=False, posix=True)
     except ValueError:
         raise invalid('curl_quoting', 'Could not parse quoting; copy the complete cURL (bash) command.') from None
+    if 'curl' in tokens:
+        tokens = tokens[tokens.index('curl'):]
     if not tokens or tokens[0] != 'curl':
         raise invalid('curl_input', 'Expected one Copy-as-cURL (bash) command, not a script.')
     values = {'-H': 'header', '--header': 'header', '-b': 'cookie', '--cookie': 'cookie',
