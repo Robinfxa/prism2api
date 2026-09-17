@@ -25,6 +25,34 @@ python3 -m venv .venv
 
 启动后在 `$HOME/.prism2api-mock/credentials/gateway.key` 生成随机调用方密钥；也可显式配置 `PRISM2API_KEY`。不把 key 输出进日志或提交进仓库。删除 `--mock` 后，未配置真实 transport 时服务不提供生成能力。
 
+## Browser-Assisted Single-Session MVP (v0.1)
+
+使用本机的 `PrismLiveProfile` 凭据（位于 `~/.prism2api/live-profile.json`，权限 `0600`）及活跃 Prism 页面运行 `serve-browser`：
+
+```bash
+python -m prism2api serve-browser \
+  --project <project_id> \
+  --conversation <conversation_id> \
+  --port 8765
+```
+
+### 接入说明与限制 (Limitations)
+
+- **v0.1 Execution Plane**: 所有的 generation 请求（`response_with_tools_start` / `response_with_tools_status`）直接在浏览器页面上下文中通过 `page.evaluate(fetch(...))` 执行，以保证 Prism WebSocket/容器的连通性。
+- **Fixed Conversation / Shared Context**: v0.1 MVP 绑定固定的 `project_id` 与 `conversation_id`，多个 API 请求将共享同一个 Prism 对话上下文。
+- **Concurrency = 1**: 内部强制使用 `asyncio.Lock` 进行单线程/单请求串行化处理，禁止并行并发请求同一 upstream 对话。
+- **Capability Isolation**: 高级 capability 门禁（`ISOLATED_CONTEXT` / `TASK_LOOKUP` / `EXPLICIT_CONTINUATION`）在 MVP 实验路径中暂保持独立隔离，保留至后续 v0.2 版本。
+
+OpenAI 兼容接口：
+```bash
+curl http://127.0.0.1:8765/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "prism-default",
+    "messages": [{"role": "user", "content": "Hello"}]
+  }'
+```
+
 已实现：原生任务提交／查询／结果／取消意图／只读核对；单条 user 文本、非流式的 `/v1/chat/completions` 子集；嵌入式和 daemon SDK。未知参数、tools、多轮消息、流式请求均明确拒绝。模型别名 `prism-default` **不是已证实的上游模型身份**；未知用量与模型确认值保持 null／省略。
 
 ## 接入真实 Prism
