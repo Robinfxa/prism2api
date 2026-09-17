@@ -45,6 +45,6 @@ python3 -m venv .venv
 - [运行时／transport 接口合同](docs/guides/transport-handoff.md)
 - [原架构总书](docs/architecture/00-master-design-book.md)
 - [项目 Overlay](Agent-init/PROJECT_OVERLAY.md)
-- [本次 OpenSpec change](openspec/changes/complete-offline-core-asf/proposal.md)
+- [本次 OpenSpec change](openspec/changes/archive/2026-09-16-complete-offline-core-asf/proposal.md)
 
 本版不是架构书全部 52 项的产品验收。尚无真实 Prism 登录、网络协议、浏览器自动化、SSE、通用工具调用、多模态、多账号、自动清理远端项目或生产部署保证。运行中缺少结局会进入 `uncertain` 并停止新生成；必须查清旧任务，而不是清库、换运行目录或重发来绕过它。
