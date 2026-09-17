@@ -11,6 +11,7 @@ from prism2api.transport.prism_web.transport import (
     PrismEventObserver,
     create_prism_web_transport,
 )
+from prism2api.transport.prism_web.http_transport import PrismHttpTransport
 
 __all__ = [
     "PrismStartRequest",
@@ -23,5 +24,7 @@ __all__ = [
     "PrismEventParser",
     "PrismEventObserver",
     "create_prism_web_transport",
+    "PrismHttpTransport",
 ]
+
 
