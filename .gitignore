@@ -25,3 +25,11 @@ browser-profile/
 *.har
 cookie*.json
 storage-state*.json
+
+# Direct HTTP private state
+bootstrap*.json
+live-profile*.json
+fixed-context*.json
+gateway.key
+direct.sqlite3*
+*.curl

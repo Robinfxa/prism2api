@@ -66,3 +66,7 @@ GitHub connector 写分支返回 403；交付应用补丁，非远端提交。�
 ## 12. 工作流集成
 
 沿用已有 GPT 工作流文件；不自动安装 custom agents、skills、hooks、全局规则或新模型。文档按需读取；本次“离线核心完成”不自动打开真实账号测试或整本架构未来功能。
+
+## Direct HTTP 0.2.0rc1 当前交付
+
+用户授权直接完成纯 HTTP 固定会话版本。当前入口为 `prism2api.direct`，见 `docs/guides/direct-http.md` 及 `docs/architecture/direct-http-fixed-context-addendum.md`。不需要继续浏览器资格研究；旧高级 capability 不伪造升级。首次真实本机验收单独记录，不把离线测试当 live。新 OpenSpec change 为 `direct-http-fixed-context`；没有自动 archive、push 或修改原归档。

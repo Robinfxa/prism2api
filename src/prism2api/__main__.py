@@ -9,6 +9,12 @@ from prism2api.client import SDKClient
 
 
 def main():
+    # prism2api-direct dispatch (0.2.0rc1)
+    import sys
+    from prism2api.direct.cli import COMMANDS, main as direct_main
+    if len(sys.argv) > 1 and sys.argv[1] in COMMANDS:
+        raise SystemExit(direct_main(sys.argv[1:]))
+
     parser = argparse.ArgumentParser(prog='prism2api')
     parser.add_argument('command', choices=['serve', 'serve-browser', 'import-curl', 'smoke'])
     parser.add_argument('--home', type=Path, default=None)
