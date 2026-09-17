@@ -30,7 +30,8 @@ def test_healthz(client, mock_transport):
     data = response.json()
     assert data["status"] == "ok"
     assert data["browser_ready"] is True
-    assert data["project_id"] == "test-proj-uuid"
+    assert "project_id" not in data
+    assert "conversation_id" not in data
 
 
 def test_chat_completions_success(client, mock_transport):
@@ -109,3 +110,20 @@ def test_upstream_error(client, mock_transport):
     response = client.post("/v1/chat/completions", json=payload)
     assert response.status_code == 502
     assert "execution error" in response.json()["detail"]
+
+
+def test_serve_browser_rejects_non_loopback_host():
+    import sys
+    import os
+    import subprocess
+    env = dict(os.environ)
+    env["PYTHONPATH"] = "src"
+    cmd = [
+        sys.executable, "-m", "prism2api", "serve-browser",
+        "--project", "proj-uuid",
+        "--conversation", "cdx1_conv",
+        "--host", "0.0.0.0"
+    ]
+    res = subprocess.run(cmd, env=env, capture_output=True, text=True)
+    assert res.returncode != 0
+    assert "must be bound to a loopback interface" in res.stderr

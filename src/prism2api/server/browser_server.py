@@ -109,8 +109,6 @@ def create_browser_app(transport: PrismBrowserTransport) -> FastAPI:
         return {
             "status": "ok" if transport.is_ready else "unavailable",
             "browser_ready": transport.is_ready,
-            "project_id": transport.project_id,
-            "conversation_id": transport.conversation_id
         }
 
     return app

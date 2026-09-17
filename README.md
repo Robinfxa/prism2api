@@ -1,6 +1,6 @@
 # prism2api
 
-**0.1.1 · 离线核心已验证，真实 Prism transport 尚未实现／验证。**
+**0.1.1 · offline core verified | browser-assisted single-session MVP = experimental live path | direct HTTP/general isolated transport 尚未完成**
 
 独立 Python SDK 与仅本机开放的文本 API。默认 `unconfigured`：模型列表为空，真实生成请求拒绝；只有显式 `--mock` 才启用合成测试，不把模拟响应包装成 Prism 回答。
 
@@ -10,7 +10,7 @@
 
 ```bash
 python3 -m venv .venv
-.venv/bin/python -m pip install -e '.[dev]'
+.venv/bin/python -m pip install -e '.[dev,browser]'
 .venv/bin/python -m pytest -q
 .venv/bin/python -m prism2api smoke --mock --home /tmp/prism2api-offline-smoke
 ```

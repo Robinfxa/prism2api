@@ -28,6 +28,9 @@ def main():
         parser.error('port must be between 1 and 65535')
 
     if args.command == 'serve-browser':
+        if args.host not in ('127.0.0.1', '::1'):
+            parser.error('serve-browser must be bound to a loopback interface (127.0.0.1 or ::1); --host 0.0.0.0 is not allowed.')
+
         if not args.project or not args.conversation:
             parser.error('serve-browser requires --project <project_id> and --conversation <conversation_id>')
 

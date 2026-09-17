@@ -85,3 +85,68 @@ async def test_prism_browser_transport_missing_ids():
 
     with pytest.raises(ProtocolError, match="missing required request_id"):
         await transport.submit_and_poll("hello", timeout=5.0)
+
+
+@pytest.mark.asyncio
+async def test_prism_browser_transport_no_output_text_raises_protocol_error():
+    transport = PrismBrowserTransport(
+        project_id="proj-123",
+        conversation_id="cdx1_456",
+        headless=True
+    )
+    transport._is_ready = True
+    mock_page = MagicMock()
+    mock_page.is_closed.return_value = False
+    transport._page = mock_page
+
+    start_payload = {"data": {"request_id": "req-999", "turn_state": "turn-888"}}
+    status_payload_no_output_text = {
+        "data": {
+            "status": "completed",
+            "response": {
+                "status": "success",
+                "payload": {
+                    "output": [
+                        {"content": [{"type": "other_type", "data": "abc"}]}
+                    ]
+                }
+            }
+        }
+    }
+    mock_page.evaluate = AsyncMock(side_effect=[start_payload, status_payload_no_output_text])
+
+    with pytest.raises(ProtocolError, match="No output_text content item found"):
+        await transport.submit_and_poll("hello", timeout=5.0)
+
+
+@pytest.mark.asyncio
+async def test_prism_browser_transport_empty_output_text_allowed():
+    transport = PrismBrowserTransport(
+        project_id="proj-123",
+        conversation_id="cdx1_456",
+        headless=True
+    )
+    transport._is_ready = True
+    mock_page = MagicMock()
+    mock_page.is_closed.return_value = False
+    transport._page = mock_page
+
+    start_payload = {"data": {"request_id": "req-999", "turn_state": "turn-888"}}
+    status_payload_empty_text = {
+        "data": {
+            "status": "completed",
+            "response": {
+                "status": "success",
+                "payload": {
+                    "output": [
+                        {"content": [{"type": "output_text", "text": ""}]}
+                    ]
+                }
+            }
+        }
+    }
+    mock_page.evaluate = AsyncMock(side_effect=[start_payload, status_payload_empty_text])
+
+    res = await transport.submit_and_poll("hello", timeout=5.0)
+    assert res == ""
+

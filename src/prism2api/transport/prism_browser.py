@@ -131,8 +131,8 @@ class PrismBrowserTransport:
                 "sandbox_token": self._live_profile.sandbox_token if self._live_profile else "",
             }
 
-            # Step 1: Trigger response_with_tools_start inside page context
-            start_result = await self._page.evaluate("""
+            # Helper JS function for start call
+            start_eval_js = """
                 async ({ projectId, conversationId, promptText, metaObj }) => {
                     try {
                         const resp = await fetch("/api/llm/response_with_tools_start", {
@@ -163,12 +163,52 @@ class PrismBrowserTransport:
                         return { error: e.toString() };
                     }
                 }
-            """, {
+            """
+
+            # Step 1: Trigger response_with_tools_start inside page context
+            start_result = await self._page.evaluate(start_eval_js, {
                 "projectId": self.project_id,
                 "conversationId": self.conversation_id,
                 "promptText": prompt,
                 "metaObj": meta_obj
             })
+
+            data = start_result.get("data", {}) if start_result else {}
+            resp_obj = data.get("response", {}) if isinstance(data, dict) else {}
+            payload_obj = resp_obj.get("payload", {}) if isinstance(resp_obj, dict) else {}
+
+            # If sandbox is reconnecting, provision fresh sandbox credentials from /api/backend/1/new and retry once
+            if payload_obj.get("reason") in ("sandbox_reconnecting", "unknown"):
+                logger.info("Sandbox reconnecting detected. Provisioning fresh sandbox credentials via /api/backend/1/new...")
+                sb_result = await self._page.evaluate("""
+                    async ({ projectId }) => {
+                        try {
+                            const resp = await fetch("/api/backend/1/new", {
+                                method: "POST",
+                                headers: { "content-type": "application/json" },
+                                credentials: "include",
+                                body: JSON.stringify({ projectId })
+                            });
+                            return await resp.json();
+                        } catch (e) {
+                            return null;
+                        }
+                    }
+                """, {"projectId": self.project_id})
+
+                if sb_result and isinstance(sb_result, dict):
+                    fresh_url = sb_result.get("url")
+                    fresh_token = sb_result.get("token")
+                    if fresh_url and fresh_token:
+                        meta_obj["sandbox_url"] = fresh_url
+                        meta_obj["sandbox_token"] = fresh_token
+                        logger.info("Retrying start request with fresh sandbox token...")
+                        start_result = await self._page.evaluate(start_eval_js, {
+                            "projectId": self.project_id,
+                            "conversationId": self.conversation_id,
+                            "promptText": prompt,
+                            "metaObj": meta_obj
+                        })
 
             if not start_result or "error" in start_result:
                 err_msg = start_result.get("error", "Unknown error") if start_result else "No response from evaluate"
@@ -225,24 +265,23 @@ class PrismBrowserTransport:
                 resp_status = resp_obj.get("status")
 
                 if root_status == "completed" and resp_status == "success":
-                    # Extract output text
                     payload = resp_obj.get("payload", {})
                     output_items = payload.get("output", [])
                     extracted_texts: List[str] = []
+                    found_output_text = False
 
                     for out_item in output_items:
                         content_list = out_item.get("content", [])
                         for c in content_list:
                             if isinstance(c, dict) and c.get("type") == "output_text":
+                                found_output_text = True
                                 txt = c.get("text", "")
-                                if txt:
-                                    extracted_texts.append(txt)
+                                extracted_texts.append(txt)
 
-                    final_output = "\n".join(extracted_texts).strip()
-                    if not final_output:
-                        # Fallback if text is empty or structured differently
-                        final_output = str(payload)
-                    return final_output
+                    if not found_output_text:
+                        raise ProtocolError("No output_text content item found in Prism status payload")
+
+                    return "\n".join(extracted_texts)
 
                 if root_status == "failed" or resp_status == "error":
                     raise ProtocolError(f"Prism upstream generation failed: {st_data}")
