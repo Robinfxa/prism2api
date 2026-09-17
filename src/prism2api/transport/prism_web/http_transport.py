@@ -73,49 +73,58 @@ class PrismHttpTransport(BaseTransport):
         return self._auth_profile
 
     def inspect_capabilities(self, session: TransportSession) -> List[CapabilitySnapshot]:
-        """Inspect capabilities. Return VERIFIED + ENABLED when auth cookie is present and READY."""
+        """Inspect capabilities.
+        
+        TEXT_GENERATION is EvidenceState.VERIFIED.
+        ActivationState is ENABLED if auth_profile status is READY and cookie is present, else DISABLED.
+        
+        All other capabilities remain EvidenceState.UNKNOWN and ActivationState.DISABLED.
+        """
         is_ready = self._auth_profile.auth_status == AuthStatus.READY and bool(self.cookie_header)
-        state = EvidenceState.VERIFIED if is_ready else EvidenceState.UNKNOWN
-        activation = ActivationState.ENABLED if is_ready else ActivationState.DISABLED
+        text_gen_activation = ActivationState.ENABLED if is_ready else ActivationState.DISABLED
 
-        return [
+        caps = [
             CapabilitySnapshot(
                 capability_id=CapabilityId.TEXT_GENERATION,
-                evidence_state=state,
-                activation_state=activation,
-                account_scope=self._auth_profile.account_scope,
-                evidence_refs=["Grade_A_live_network_trace"],
-                tested_at="2026-09-17T00:09:35Z",
-                review_due_at="2026-10-17T00:09:35Z",
-            ),
-            CapabilitySnapshot(
-                capability_id=CapabilityId.ISOLATED_CONTEXT,
-                evidence_state=state,
-                activation_state=activation,
-                account_scope=self._auth_profile.account_scope,
-                evidence_refs=["Grade_A_live_network_trace"],
-                tested_at="2026-09-17T00:09:35Z",
-                review_due_at="2026-10-17T00:09:35Z",
-            ),
-            CapabilitySnapshot(
-                capability_id=CapabilityId.DELTA_STREAM,
-                evidence_state=state,
-                activation_state=activation,
+                evidence_state=EvidenceState.VERIFIED,
+                activation_state=text_gen_activation,
                 account_scope=self._auth_profile.account_scope,
                 evidence_refs=["Grade_A_live_network_trace"],
                 tested_at="2026-09-17T00:09:35Z",
                 review_due_at="2026-10-17T00:09:35Z",
             ),
         ]
+        
+        other_ids = [
+            CapabilityId.ISOLATED_CONTEXT,
+            CapabilityId.TASK_LOOKUP,
+            CapabilityId.DELTA_STREAM,
+            CapabilityId.CANCEL_CONFIRMATION,
+            CapabilityId.MODEL_SELECTION,
+            CapabilityId.USAGE_REPORTING,
+        ]
+        for cap_id in other_ids:
+            caps.append(
+                CapabilitySnapshot(
+                    capability_id=cap_id,
+                    evidence_state=EvidenceState.UNKNOWN,
+                    activation_state=ActivationState.DISABLED,
+                    account_scope=self._auth_profile.account_scope,
+                )
+            )
+        return caps
 
     def prepare_context(self, session: TransportSession, context: Any, operation_id: str) -> RemoteHandle:
-        """Prepare context workspace binding."""
+        """Prepare context workspace binding without synthetic identity fallback."""
         if isinstance(context, dict):
-            workspace_ref = context.get("workspace_ref") or context.get("project_id") or "proj_fixture_001"
-            conversation_ref = context.get("conversation_ref") or context.get("conversation_id") or f"cdx1_{operation_id}"
+            workspace_ref = context.get("workspace_ref") or context.get("project_id")
+            conversation_ref = context.get("conversation_ref") or context.get("conversation_id")
         else:
-            workspace_ref = getattr(context, "workspace_ref", None) or getattr(context, "project_id", None) or "proj_fixture_001"
-            conversation_ref = getattr(context, "conversation_ref", None) or getattr(context, "conversation_id", None) or f"cdx1_{operation_id}"
+            workspace_ref = getattr(context, "workspace_ref", None) or getattr(context, "project_id", None)
+            conversation_ref = getattr(context, "conversation_ref", None) or getattr(context, "conversation_id", None)
+
+        if not workspace_ref or not conversation_ref:
+            raise AdmissionBlockedError("Missing required context identity (workspace_ref/project_id or conversation_ref/conversation_id)")
 
         return RemoteHandle(
             workspace_ref=workspace_ref,
@@ -134,7 +143,7 @@ class PrismHttpTransport(BaseTransport):
         """Submit generation request exactly ONCE to prism.openai.com.
 
         NEVER re-post or retry on network errors.
-        Secrets are NEVER stored in raw_metadata.
+        Fails closed on missing context or missing remote receipts.
         """
         if self._auth_profile.auth_status != AuthStatus.READY or not self.cookie_header:
             raise AdmissionBlockedError("PrismHttpTransport: Auth profile is not ready or missing cookie")
@@ -146,6 +155,18 @@ class PrismHttpTransport(BaseTransport):
                 raise TimeoutError("Session deadline exceeded before submit")
             timeout_sec = min(timeout_sec, remaining)
 
+        project_id = session.context_binding.get("workspace_ref") or session.context_binding.get("project_id")
+        conversation_id = session.context_binding.get("conversation_ref") or session.context_binding.get("conversation_id")
+        user_id = session.context_binding.get("user_id")
+
+        if not project_id or not conversation_id or not user_id:
+            raise AdmissionBlockedError("Missing required live context identity (workspace_ref/project_id, conversation_ref/conversation_id, or user_id)")
+
+        sb_url = session.context_binding.get("sandbox_url")
+        sb_token = session.context_binding.get("sandbox_token")
+        if not sb_url or not sb_token:
+            raise AdmissionBlockedError("Missing required live context sandbox material (sandbox_url or sandbox_token)")
+
         url = f"{self.base_url}/api/llm/response_with_tools_start"
         headers = {
             "accept": "*/*",
@@ -156,22 +177,15 @@ class PrismHttpTransport(BaseTransport):
             "user-agent": "prism2api-client/0.1.1",
         }
 
-        project_id = session.context_binding.get("workspace_ref") or "proj_fixture_001"
-        conversation_id = session.context_binding.get("conversation_ref") or f"cdx1_{run_id}"
-
         meta = {
             "projectId": project_id,
-            "userId": session.context_binding.get("user_id", "user_fixture_001"),
+            "userId": user_id,
             "model": "gpt-6-astra",
             "reasoning_effort": "medium",
             "frontend_origin": self.base_url,
+            "sandbox_url": sb_url,
+            "sandbox_token": sb_token,
         }
-        sb_url = session.context_binding.get("sandbox_url")
-        sb_token = session.context_binding.get("sandbox_token")
-        if sb_url:
-            meta["sandbox_url"] = sb_url
-        if sb_token:
-            meta["sandbox_token"] = sb_token
 
         payload = {
             "input": [
@@ -192,18 +206,21 @@ class PrismHttpTransport(BaseTransport):
                     raise ProtocolError(f"HTTP submit failed with status {response.status_code}: {response.text}")
                 res_data = response.json()
         except httpx.RequestError as exc:
-            # Request may have reached server -> raise error so supervisor marks UNCERTAIN
             raise ProtocolError(f"Network error during submit: {str(exc)}") from exc
+        except ValueError as exc:
+            raise ProtocolError(f"Malformed submit JSON response: {str(exc)}") from exc
 
-        task_id = res_data.get("request_id") or res_data.get("async_job_id") or f"task_{run_id}_{attempt_id}"
+        task_id = res_data.get("request_id") or res_data.get("async_job_id") or res_data.get("job_id")
         turn_state = res_data.get("turn_state")
-        
+
+        if not task_id or not turn_state:
+            raise ProtocolError("Submit response missing required remote receipt (request_id/async_job_id or turn_state)")
+
         raw_meta = {
             "endpoint": "/api/llm/response_with_tools_start",
             "http_status": response.status_code,
+            "turn_state": turn_state,
         }
-        if turn_state:
-            raw_meta["turn_state"] = turn_state
         if res_data.get("status") == "completed":
             raw_meta["initial_response"] = res_data
 
@@ -217,14 +234,23 @@ class PrismHttpTransport(BaseTransport):
         )
 
     def observe_events(self, handle: RemoteHandle) -> List[Dict[str, Any]]:
-        """Read-only observation calling /api/llm/response_with_tools_status."""
+        """Read-only observation calling /api/llm/response_with_tools_status.
+
+        Enforces strict identity validation and raises ProtocolError on network/HTTP errors.
+        """
         if not self.cookie_header:
             raise AdmissionBlockedError("PrismHttpTransport: Auth cookie missing for event observation")
 
+        turn_state = (handle.raw_metadata or {}).get("turn_state")
+        if not turn_state or not isinstance(turn_state, dict):
+            raise ProtocolError("Missing valid turn_state in RemoteHandle for status observation")
+
         # If submit response was already completed inline
         if handle.raw_metadata and "initial_response" in handle.raw_metadata:
+            res_data = handle.raw_metadata["initial_response"]
+            self._validate_status_identity(res_data, handle, turn_state)
             return self.parser.parse_status_response(
-                handle.raw_metadata["initial_response"],
+                res_data,
                 task_ref=handle.task_ref or "unknown"
             )
 
@@ -238,18 +264,8 @@ class PrismHttpTransport(BaseTransport):
             "user-agent": "prism2api-client/0.1.1",
         }
 
-        turn_state = (handle.raw_metadata or {}).get("turn_state") or {
-            "version": 1,
-            "conversation_id": handle.conversation_ref or "cdx1_default",
-            "prompt": "",
-            "reasoning_effort": "medium",
-            "user_id": "user-default",
-            "project_id": handle.workspace_ref or "proj-default",
-            "async_job_id": handle.task_ref,
-        }
-
         payload = {
-            "request_id": handle.task_ref or "req_default",
+            "request_id": handle.task_ref,
             "turn_state": turn_state,
         }
 
@@ -260,17 +276,15 @@ class PrismHttpTransport(BaseTransport):
                 with httpx.Client(timeout=30.0) as client:
                     response = client.post(url, headers=headers, json=payload)
                     if response.status_code != 200:
-                        return [{
-                            "type": "RunFailed",
-                            "payload": {
-                                "task_ref": handle.task_ref,
-                                "error": f"HTTP status failed with code {response.status_code}",
-                            }
-                        }]
-                    res_data = response.json()
+                        raise ProtocolError(f"HTTP status endpoint returned code {response.status_code}")
+                    try:
+                        res_data = response.json()
+                    except ValueError as exc:
+                        raise ProtocolError(f"Malformed status JSON response: {str(exc)}") from exc
+
+                    self._validate_status_identity(res_data, handle, turn_state)
+
                     parsed = self.parser.parse_status_response(res_data, task_ref=handle.task_ref or "unknown")
-                    
-                    # If we got a terminal event (RunCompleted / RunFailed / CancellationConfirmed)
                     if any(e.get("type") in ("RunCompleted", "RunFailed", "CancellationConfirmed") for e in parsed):
                         return parsed
                     
@@ -278,10 +292,22 @@ class PrismHttpTransport(BaseTransport):
             except httpx.RequestError as exc:
                 raise ProtocolError(f"Network error during status observation: {str(exc)}") from exc
 
-        return [{
-            "type": "RunFailed",
-            "payload": {"task_ref": handle.task_ref, "error": "Status observation timed out"}
-        }]
+        raise ProtocolError("Status observation timed out without terminal state")
+
+    def _validate_status_identity(self, res_data: Dict[str, Any], handle: RemoteHandle, turn_state: Dict[str, Any]) -> None:
+        """Strictly validate identity parameters in status response."""
+        res_req_id = res_data.get("request_id")
+        if res_req_id and handle.task_ref and res_req_id != handle.task_ref:
+            raise ProtocolError(f"Identity mismatch in status response: request_id '{res_req_id}' != expected '{handle.task_ref}'")
+
+        expected_async_job_id = turn_state.get("async_job_id")
+        res_async_job_id = res_data.get("codex_async_job_id") or res_data.get("async_job_id")
+        if res_async_job_id and expected_async_job_id and res_async_job_id != expected_async_job_id:
+            raise ProtocolError(f"Identity mismatch in status response: codex_async_job_id '{res_async_job_id}' != expected '{expected_async_job_id}'")
+
+        res_conv_id = res_data.get("conversationId") or res_data.get("conversation_id")
+        if res_conv_id and handle.conversation_ref and res_conv_id != handle.conversation_ref:
+            raise ProtocolError(f"Identity mismatch in status response: conversationId '{res_conv_id}' != expected '{handle.conversation_ref}'")
 
     def lookup_events(self, session: TransportSession, handle: RemoteHandle) -> Dict[str, Any]:
         """Read-only lookup for task status on prism.openai.com."""

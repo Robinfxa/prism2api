@@ -33,8 +33,18 @@ def test_wire_parser_status_response_completed():
     """Verify parse_status_response maps completed status payload to RunCompleted."""
     response_data = {
         "status": "completed",
-        "finish_reason": "stop",
-        "text": "PRISM_PROBE_001"
+        "response": {
+            "status": "success",
+            "payload": {
+                "output": [
+                    {
+                        "content": [
+                            {"type": "output_text", "text": "PRISM_PROBE_001"}
+                        ]
+                    }
+                ]
+            }
+        }
     }
     events = PrismWireParser.parse_status_response(response_data, task_ref="task_999")
     
@@ -43,3 +53,4 @@ def test_wire_parser_status_response_completed():
     assert events[0]["payload"]["text"] == "PRISM_PROBE_001"
     assert events[1]["type"] == "RunCompleted"
     assert events[1]["payload"]["text"] == "PRISM_PROBE_001"
+

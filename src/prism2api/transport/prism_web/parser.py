@@ -24,65 +24,94 @@ class PrismWireParser:
 
     @staticmethod
     def parse_status_response(response_json: Dict[str, Any], task_ref: str) -> List[Dict[str, Any]]:
-        """Parse response from /api/llm/response_with_tools_status."""
+        """Parse response from /api/llm/response_with_tools_status.
+
+        RunCompleted is emitted ONLY when:
+        1. root status == "completed"
+        2. response.status == "success"
+        3. output payload structure is valid and interpretable.
+
+        RunFailed is emitted ONLY from explicit upstream remote failure evidence.
+        """
         events = []
-        status = response_json.get("status", "").lower()
-        
-        extracted_text = ""
-        res_payload = response_json.get("response", {}).get("payload", {})
-        outputs = res_payload.get("output", [])
-        if outputs and isinstance(outputs, list):
-            for out in outputs:
-                contents = out.get("content", [])
-                for item in contents:
-                    if item.get("type") in ("output_text", "text") and "text" in item:
-                        extracted_text += item["text"]
-                        
-        if not extracted_text and "text" in response_json:
-            extracted_text = response_json["text"]
+        root_status = str(response_json.get("status", "")).lower()
+        res_obj = response_json.get("response")
 
-        if extracted_text:
-            events.append({
-                "type": "TextDelta",
-                "payload": {"task_ref": task_ref, "text": extracted_text}
-            })
-
-        res_obj = response_json.get("response", {})
+        # Explicit remote failure in nested response
         if isinstance(res_obj, dict) and res_obj.get("status") == "error":
-            err_msg = res_obj.get("payload", {}).get("message") or res_obj.get("payload", {}).get("reason") or "Upstream error"
-            events.append({
+            err_msg = (
+                res_obj.get("payload", {}).get("message")
+                or res_obj.get("payload", {}).get("reason")
+                or "Upstream execution error"
+            )
+            return [{
                 "type": "RunFailed",
                 "payload": {"task_ref": task_ref, "error": err_msg}
-            })
-            return events
+            }]
 
-        if status in ("completed", "finished", "success", "done"):
-            finish_reason = "stop"
-            events.append({
-                "type": "RunCompleted",
-                "payload": {
-                    "task_ref": task_ref,
-                    "finish_reason": finish_reason,
-                    "text": extracted_text
-                }
-            })
-        elif status in ("failed", "error"):
-            events.append({
+        if root_status in ("failed", "error"):
+            return [{
                 "type": "RunFailed",
                 "payload": {
                     "task_ref": task_ref,
                     "error": response_json.get("error", "Remote execution failed")
                 }
-            })
-        elif status in ("cancelled", "canceled"):
-            events.append({
+            }]
+
+        if root_status in ("cancelled", "canceled"):
+            return [{
                 "type": "CancellationConfirmed",
                 "payload": {"task_ref": task_ref}
-            })
-        elif not events and status != "pending":
-            events.append({
-                "type": "ProtocolUnknown",
-                "payload": {"task_ref": task_ref, "raw": response_json}
-            })
-            
+            }]
+
+        # Strict completion check: root status completed AND response status success
+        if root_status == "completed" and isinstance(res_obj, dict) and res_obj.get("status") == "success":
+            res_payload = res_obj.get("payload", {})
+            outputs = res_payload.get("output", [])
+            extracted_text = ""
+            valid_schema = False
+
+            if isinstance(outputs, list):
+                valid_schema = True
+                for out in outputs:
+                    if isinstance(out, dict):
+                        contents = out.get("content", [])
+                        if isinstance(contents, list):
+                            for item in contents:
+                                if isinstance(item, dict) and item.get("type") in ("output_text", "text") and "text" in item:
+                                    extracted_text += item["text"]
+
+            if not extracted_text and "text" in response_json:
+                extracted_text = response_json["text"]
+                valid_schema = True
+
+            if valid_schema:
+                if extracted_text:
+                    events.append({
+                        "type": "TextDelta",
+                        "payload": {"task_ref": task_ref, "text": extracted_text}
+                    })
+                events.append({
+                    "type": "RunCompleted",
+                    "payload": {
+                        "task_ref": task_ref,
+                        "finish_reason": "stop",
+                        "text": extracted_text,
+                    }
+                })
+                return events
+            else:
+                return [{
+                    "type": "ProtocolUnknown",
+                    "payload": {"task_ref": task_ref, "raw": response_json, "error": "Malformed output structure"}
+                }]
+
+        if root_status in ("pending", "in_progress", "running"):
+            return events
+
+        events.append({
+            "type": "ProtocolUnknown",
+            "payload": {"task_ref": task_ref, "raw": response_json}
+        })
         return events
+
