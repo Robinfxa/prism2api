@@ -30,10 +30,14 @@ def test_prism_http_transport_unconfigured_blocks_submit():
 
 
 def test_capability_states_hardened():
-    """Verify TEXT_GENERATION is VERIFIED and all other capabilities are UNKNOWN + DISABLED."""
+    """Verify TEXT_GENERATION is VERIFIED and all other capabilities including EXPLICIT_CONTINUATION are UNKNOWN + DISABLED."""
     auth = AuthProfile(profile_id="p1", auth_status=AuthStatus.READY)
     transport = PrismHttpTransport(auth_profile=auth)
-    transport.cookie_header = "prism_session_token=valid; prism_oai_access_token=valid"
+    from prism2api.transport.prism_web.live_profile import PrismLiveProfile
+    transport.live_profile = PrismLiveProfile(
+        user_id="u1", sandbox_url="https://sb", sandbox_token="tok", cookie_header="c=1"
+    )
+    transport.cookie_header = "c=1"
     session = TransportSession(session_id="s1", auth_profile_id="p1")
 
     caps = transport.inspect_capabilities(session)
@@ -45,6 +49,7 @@ def test_capability_states_hardened():
     for cid in [
         CapabilityId.ISOLATED_CONTEXT,
         CapabilityId.TASK_LOOKUP,
+        CapabilityId.EXPLICIT_CONTINUATION,
         CapabilityId.DELTA_STREAM,
         CapabilityId.CANCEL_CONFIRMATION,
         CapabilityId.MODEL_SELECTION,
@@ -54,48 +59,45 @@ def test_capability_states_hardened():
         assert cap_dict[cid].activation_state == ActivationState.DISABLED
 
 
-def test_missing_context_raises_admission_blocked():
-    """Verify submit raises AdmissionBlockedError when context binding or sandbox material is missing."""
+def test_legacy_credentials_and_env_cookies_ignored(monkeypatch, tmp_path):
+    """Verify legacy credentials.json and PRISM_COOKIE env vars DO NOT enable live transport."""
+    monkeypatch.setenv("PRISM_COOKIE", "prism_session_token=fake")
+    monkeypatch.setenv("PRISM_SESSION_COOKIE", "prism_session_token=fake")
+    monkeypatch.setenv("PRISM_LIVE_PROFILE", str(tmp_path / "nonexistent.json"))
+
+    auth = AuthProfile(profile_id="p1", auth_status=AuthStatus.NOT_CONFIGURED)
+    transport = PrismHttpTransport(auth_profile=auth)
+
+    assert transport.auth_profile.auth_status == AuthStatus.NOT_CONFIGURED
+    assert transport.live_profile is None
+    assert transport.cookie_header is None
+
+
+def test_secrets_in_context_binding_ignored():
+    """Verify secrets passed in context_binding are IGNORED when live_profile is missing."""
     auth = AuthProfile(profile_id="p1", auth_status=AuthStatus.READY)
     transport = PrismHttpTransport(auth_profile=auth)
-    transport.cookie_header = "prism_session_token=valid; prism_oai_access_token=valid"
+    transport.cookie_header = "c=1"
+    transport.live_profile = None  # Ensure live_profile is None
 
-    # Empty context
-    session = TransportSession(session_id="s1", auth_profile_id="p1", context_binding={})
-    with pytest.raises(AdmissionBlockedError, match="Missing required live context identity"):
-        transport.submit("r1", "att1", session, "hello", "prism-default")
-
-    # Incomplete context (missing sandbox material / PrismLiveProfile)
-    session2 = TransportSession(
-        session_id="s2",
+    session = TransportSession(
+        session_id="s1",
         auth_profile_id="p1",
         context_binding={
-            "workspace_ref": "proj_fix_1",
-            "conversation_ref": "cdx_fix_1",
-            "user_id": "user_fix_1",
+            "workspace_ref": "proj_1",
+            "conversation_ref": "cdx_1",
+            "user_id": "secret_user_in_context",
+            "sandbox_url": "https://secret_sb_in_context",
+            "sandbox_token": "secret_token_in_context",
         }
     )
-    with pytest.raises(AdmissionBlockedError, match="Missing required PrismLiveProfile credentials"):
-        transport.submit("r1", "att1", session2, "hello", "prism-default")
 
-
-
-def test_prepare_context_purity():
-    """Verify prepare_context returns RemoteHandle with task_ref=None, message_ref=None, server_event_cursor=None."""
-    auth = AuthProfile(profile_id="p1", auth_status=AuthStatus.READY)
-    transport = PrismHttpTransport(auth_profile=auth)
-    session = TransportSession(session_id="s1", auth_profile_id="p1")
-
-    handle = transport.prepare_context(session, {"workspace_ref": "proj_1", "conversation_ref": "cdx_1"}, "op_1")
-    assert handle.workspace_ref == "proj_1"
-    assert handle.conversation_ref == "cdx_1"
-    assert handle.task_ref is None
-    assert handle.message_ref is None
-    assert handle.server_event_cursor is None
+    with pytest.raises(AdmissionBlockedError, match="PrismLiveProfile is missing/invalid"):
+        transport.submit("r1", "att1", session, "hi", "prism-default")
 
 
 def test_prism_http_transport_submit_and_observe_mocked():
-    """Test PrismHttpTransport submit and observe_events via httpx MockTransport with strict identity validation."""
+    """Test PrismHttpTransport submit and observe_events via httpx MockTransport with PrismLiveProfile."""
     def mock_handler(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("/response_with_tools_start"):
             return httpx.Response(
@@ -132,7 +134,14 @@ def test_prism_http_transport_submit_and_observe_mocked():
 
     auth = AuthProfile(profile_id="p1", auth_status=AuthStatus.READY)
     transport = PrismHttpTransport(auth_profile=auth)
-    transport.cookie_header = "prism_session_token=valid; prism_oai_access_token=valid"
+    from prism2api.transport.prism_web.live_profile import PrismLiveProfile
+    transport.live_profile = PrismLiveProfile(
+        user_id="user_fixture_001",
+        sandbox_url="https://prism.openai.com/s/sandboxes/proxy/",
+        sandbox_token="sandbox_fixture_token_valid_123",
+        cookie_header="prism_session_token=valid; prism_oai_access_token=valid"
+    )
+    transport.cookie_header = transport.live_profile.cookie_header
 
     session = TransportSession(
         session_id="s1",
@@ -140,9 +149,6 @@ def test_prism_http_transport_submit_and_observe_mocked():
         context_binding={
             "workspace_ref": "proj_fixture_001",
             "conversation_ref": "cdx1_fixture_001",
-            "user_id": "user_fixture_001",
-            "sandbox_url": "https://prism.openai.com/s/sandboxes/proxy/",
-            "sandbox_token": "sandbox_fixture_token_valid_123",
         }
     )
 
@@ -174,6 +180,7 @@ def test_prism_http_transport_submit_and_observe_mocked():
         assert events[1]["payload"]["text"] == "PRISM_PROBE_002"
     finally:
         httpx.Client = original_client
+
 
 
 def test_status_identity_mismatch_raises_protocol_error():

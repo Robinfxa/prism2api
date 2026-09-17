@@ -54,3 +54,43 @@ def test_wire_parser_status_response_completed():
     assert events[1]["type"] == "RunCompleted"
     assert events[1]["payload"]["text"] == "PRISM_PROBE_001"
 
+
+def test_wire_parser_completed_empty_outputs_list_returns_protocol_unknown():
+    """Verify completed status with outputs=[] returns ProtocolUnknown."""
+    response_data = {
+        "status": "completed",
+        "response": {
+            "status": "success",
+            "payload": {
+                "output": []
+            }
+        }
+    }
+    events = PrismWireParser.parse_status_response(response_data, task_ref="task_999")
+    assert len(events) == 1
+    assert events[0]["type"] == "ProtocolUnknown"
+
+
+def test_wire_parser_completed_empty_text_string_returns_run_completed():
+    """Verify completed status with output_text text='' returns RunCompleted with empty text."""
+    response_data = {
+        "status": "completed",
+        "response": {
+            "status": "success",
+            "payload": {
+                "output": [
+                    {
+                        "content": [
+                            {"type": "output_text", "text": ""}
+                        ]
+                    }
+                ]
+            }
+        }
+    }
+    events = PrismWireParser.parse_status_response(response_data, task_ref="task_999")
+    assert len(events) == 1
+    assert events[0]["type"] == "RunCompleted"
+    assert events[0]["payload"]["text"] == ""
+
+

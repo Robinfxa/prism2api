@@ -69,23 +69,23 @@ class PrismWireParser:
             res_payload = res_obj.get("payload", {})
             outputs = res_payload.get("output", [])
             extracted_text = ""
-            valid_schema = False
+            saw_output_text_item = False
 
             if isinstance(outputs, list):
-                valid_schema = True
                 for out in outputs:
                     if isinstance(out, dict):
                         contents = out.get("content", [])
                         if isinstance(contents, list):
                             for item in contents:
                                 if isinstance(item, dict) and item.get("type") in ("output_text", "text") and "text" in item:
-                                    extracted_text += item["text"]
+                                    saw_output_text_item = True
+                                    extracted_text += str(item["text"])
 
-            if not extracted_text and "text" in response_json:
-                extracted_text = response_json["text"]
-                valid_schema = True
+            if not saw_output_text_item and "text" in response_json:
+                extracted_text = str(response_json["text"])
+                saw_output_text_item = True
 
-            if valid_schema:
+            if saw_output_text_item:
                 if extracted_text:
                     events.append({
                         "type": "TextDelta",
@@ -103,8 +103,9 @@ class PrismWireParser:
             else:
                 return [{
                     "type": "ProtocolUnknown",
-                    "payload": {"task_ref": task_ref, "raw": response_json, "error": "Malformed output structure"}
+                    "payload": {"task_ref": task_ref, "raw": response_json, "error": "Missing valid output text item in payload"}
                 }]
+
 
         if root_status in ("pending", "in_progress", "running"):
             return events

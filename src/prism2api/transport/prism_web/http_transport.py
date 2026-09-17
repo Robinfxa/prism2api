@@ -41,43 +41,36 @@ class PrismHttpTransport(BaseTransport):
         )
         self.parser = PrismWireParser()
         self.cookie_header: Optional[str] = None
-        self.live_profile: Optional[PrismLiveProfile] = None
+        self._live_profile: Optional[PrismLiveProfile] = None
         self._load_credentials()
 
+    @property
+    def live_profile(self) -> Optional[PrismLiveProfile]:
+        return self._live_profile
+
+    @live_profile.setter
+    def live_profile(self, profile: Optional[PrismLiveProfile]) -> None:
+        self._live_profile = profile
+        if profile and profile.cookie_header:
+            self.cookie_header = profile.cookie_header
+            self._auth_profile.auth_status = AuthStatus.READY
+        else:
+            if not profile:
+                self.cookie_header = None
+            self._auth_profile.auth_status = AuthStatus.NOT_CONFIGURED
+
     def _load_credentials(self) -> None:
-        """Locate live profile / credentials from PrismLiveProfile or credential_locator."""
+        """Locate PrismLiveProfile directly. NO fallbacks to legacy credentials.json, env cookies, or context binding."""
+        profile_path = None
+        if self._auth_profile.credential_locator:
+            profile_path = Path(self._auth_profile.credential_locator)
+
         try:
-            self.live_profile = PrismLiveProfile.load()
-            if self.live_profile.cookie_header:
-                self.cookie_header = self.live_profile.cookie_header
-                self._auth_profile.auth_status = AuthStatus.READY
+            loaded = PrismLiveProfile.load(profile_path=profile_path)
+            self.live_profile = loaded
         except AdmissionBlockedError:
-            pass
+            self.live_profile = None
 
-        if not self.cookie_header:
-            locator_path = None
-            if self._auth_profile.credential_locator:
-                locator_path = Path(self._auth_profile.credential_locator)
-            else:
-                default_path = Path.home() / ".prism2api" / "credentials.json"
-                if default_path.exists():
-                    locator_path = default_path
-
-            if locator_path and locator_path.exists():
-                try:
-                    with open(locator_path, "r", encoding="utf-8") as f:
-                        cred_data = json.load(f)
-                        self.cookie_header = cred_data.get("cookie")
-                        if self.cookie_header:
-                            self._auth_profile.auth_status = AuthStatus.READY
-                except Exception:
-                    pass
-
-        if not self.cookie_header:
-            env_cookie = os.getenv("PRISM_COOKIE") or os.getenv("PRISM_SESSION_COOKIE")
-            if env_cookie:
-                self.cookie_header = env_cookie
-                self._auth_profile.auth_status = AuthStatus.READY
 
     @property
     def auth_profile(self) -> AuthProfile:
@@ -87,11 +80,11 @@ class PrismHttpTransport(BaseTransport):
         """Inspect capabilities.
         
         TEXT_GENERATION is EvidenceState.VERIFIED.
-        ActivationState is ENABLED if auth_profile status is READY and cookie is present, else DISABLED.
+        ActivationState is ENABLED if auth_profile status is READY and live_profile is present, else DISABLED.
         
         All other capabilities remain EvidenceState.UNKNOWN and ActivationState.DISABLED.
         """
-        is_ready = self._auth_profile.auth_status == AuthStatus.READY and bool(self.cookie_header)
+        is_ready = self._auth_profile.auth_status == AuthStatus.READY and bool(self.cookie_header) and bool(self.live_profile)
         text_gen_activation = ActivationState.ENABLED if is_ready else ActivationState.DISABLED
 
         caps = [
@@ -109,6 +102,7 @@ class PrismHttpTransport(BaseTransport):
         other_ids = [
             CapabilityId.ISOLATED_CONTEXT,
             CapabilityId.TASK_LOOKUP,
+            CapabilityId.EXPLICIT_CONTINUATION,
             CapabilityId.DELTA_STREAM,
             CapabilityId.CANCEL_CONFIRMATION,
             CapabilityId.MODEL_SELECTION,
@@ -155,11 +149,12 @@ class PrismHttpTransport(BaseTransport):
     ) -> RemoteHandle:
         """Submit generation request exactly ONCE to prism.openai.com.
 
-        NEVER re-post or retry on network errors.
-        Fails closed on missing context or missing remote receipts.
+        PrismLiveProfile is the ONLY allowed secret/config source.
+        ContextBinding carries ONLY workspace_ref and conversation_ref.
+        Missing/invalid live profile raises AdmissionBlockedError.
         """
-        if self._auth_profile.auth_status != AuthStatus.READY or not self.cookie_header:
-            raise AdmissionBlockedError("PrismHttpTransport: Auth profile is not ready or missing cookie")
+        if not self.live_profile or self._auth_profile.auth_status != AuthStatus.READY or not self.cookie_header:
+            raise AdmissionBlockedError("PrismHttpTransport: Auth profile is not ready or PrismLiveProfile is missing/invalid")
 
         timeout_sec = session.io_timeout_seconds or 30.0
         if session.deadline_monotonic:
@@ -174,12 +169,13 @@ class PrismHttpTransport(BaseTransport):
         if not project_id or not conversation_id:
             raise AdmissionBlockedError("Missing required live context identity (workspace_ref/project_id or conversation_ref/conversation_id)")
 
-        user_id = self.live_profile.user_id if self.live_profile else session.context_binding.get("user_id")
-        sb_url = self.live_profile.sandbox_url if self.live_profile else session.context_binding.get("sandbox_url")
-        sb_token = self.live_profile.sandbox_token if self.live_profile else session.context_binding.get("sandbox_token")
+        user_id = self.live_profile.user_id
+        sb_url = self.live_profile.sandbox_url
+        sb_token = self.live_profile.sandbox_token
 
         if not user_id or not sb_url or not sb_token:
             raise AdmissionBlockedError("Missing required PrismLiveProfile credentials (user_id, sandbox_url, or sandbox_token)")
+
 
         url = f"{self.base_url}/api/llm/response_with_tools_start"
         headers = {
