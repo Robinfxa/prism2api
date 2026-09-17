@@ -30,7 +30,7 @@ def main():
 
     if args.command == 'import-curl':
         import sys
-        from prism2api.transport.prism_web.curl_parser import import_curl_to_profile, parse_curl_command
+        from prism2api.transport.prism_web.curl_parser import import_curl_to_profile
 
         curl_text = ""
         if args.file and args.file.exists():
@@ -44,15 +44,21 @@ def main():
         if not curl_text.strip():
             parser.error("cURL text is empty.")
 
-        profile = import_curl_to_profile(curl_text)
-        meta = parse_curl_command(curl_text)
-        print("Live Profile imported successfully from DevTools cURL.")
-        print("Saved to: ~/.prism2api/live-profile.json (mode 0600)")
-        print("Status: Cookie present:", bool(profile.cookie_header), "| User ID present:", bool(profile.user_id), "| Sandbox token present:", bool(profile.sandbox_token))
-        if meta.get("project_id"):
-            print(f"Target project_id: {meta['project_id']}")
-        if meta.get("conversation_id"):
-            print(f"Target conversation_id: {meta['conversation_id']}")
+        res = import_curl_to_profile(curl_text)
+        presence = res["presence"]
+        status_str = res["status"]
+
+        print(f"cURL import status: {status_str.upper()}")
+        print("Saved Secrets to: ~/.prism2api/live-profile.json (mode 0600)")
+        print("Saved Identifiers to: ~/.prism2api/fixed-context.json (mode 0600)")
+        print("\nRequired Pure HTTP Field Presence:")
+        for field, is_present in presence.items():
+            print(f"  - {field}: {'PRESENT' if is_present else 'MISSING'}")
+
+        if not res["is_complete"]:
+            print("\nWarning: cURL import is INCOMPLETE. Some required pure HTTP fields are missing.")
+        else:
+            print("\nImport READY: All required pure HTTP fields are present.")
         return
 
     if args.command == 'serve-browser':
