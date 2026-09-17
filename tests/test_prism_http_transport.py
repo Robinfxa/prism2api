@@ -9,8 +9,10 @@ from prism2api.errors import AdmissionBlockedError, ProtocolError
 
 def test_prism_http_transport_unconfigured_blocks_submit():
     """Test PrismHttpTransport blocks submission when cookie is missing."""
-    auth = AuthProfile(profile_id="p1", auth_status=AuthStatus.NOT_CONFIGURED)
+    auth = AuthProfile(profile_id="p1", auth_status=AuthStatus.NOT_CONFIGURED, credential_locator="/tmp/nonexistent_cred_locator.json")
     transport = PrismHttpTransport(auth_profile=auth)
+    transport.cookie_header = None
+    transport._auth_profile.auth_status = AuthStatus.NOT_CONFIGURED
     session = TransportSession(session_id="s1", auth_profile_id="p1")
 
     caps = transport.inspect_capabilities(session)

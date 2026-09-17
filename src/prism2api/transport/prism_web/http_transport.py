@@ -108,11 +108,15 @@ class PrismHttpTransport(BaseTransport):
             ),
         ]
 
-    def prepare_context(self, session: TransportSession, context: Dict[str, Any], operation_id: str) -> RemoteHandle:
+    def prepare_context(self, session: TransportSession, context: Any, operation_id: str) -> RemoteHandle:
         """Prepare context workspace binding."""
-        workspace_ref = context.get("workspace_ref") or context.get("project_id") or f"proj_{operation_id}"
-        conversation_ref = context.get("conversation_ref") or context.get("conversation_id") or f"cdx1_{operation_id}"
-        
+        if isinstance(context, dict):
+            workspace_ref = context.get("workspace_ref") or context.get("project_id") or "proj_fixture_001"
+            conversation_ref = context.get("conversation_ref") or context.get("conversation_id") or f"cdx1_{operation_id}"
+        else:
+            workspace_ref = getattr(context, "workspace_ref", None) or getattr(context, "project_id", None) or "proj_fixture_001"
+            conversation_ref = getattr(context, "conversation_ref", None) or getattr(context, "conversation_id", None) or f"cdx1_{operation_id}"
+
         return RemoteHandle(
             workspace_ref=workspace_ref,
             conversation_ref=conversation_ref,
@@ -155,6 +159,20 @@ class PrismHttpTransport(BaseTransport):
         project_id = session.context_binding.get("workspace_ref") or "proj_fixture_001"
         conversation_id = session.context_binding.get("conversation_ref") or f"cdx1_{run_id}"
 
+        meta = {
+            "projectId": project_id,
+            "userId": session.context_binding.get("user_id", "user_fixture_001"),
+            "model": "gpt-6-astra",
+            "reasoning_effort": "medium",
+            "frontend_origin": self.base_url,
+        }
+        sb_url = session.context_binding.get("sandbox_url") or "https://prism.openai.com/s/sandboxes/proxy/"
+        sb_token = session.context_binding.get("sandbox_token") or getattr(self, "sandbox_token", None) or "sandbox_token_fixture"
+        if sb_url:
+            meta["sandbox_url"] = sb_url
+        if sb_token:
+            meta["sandbox_token"] = sb_token
+
         payload = {
             "input": [
                 {
@@ -163,13 +181,7 @@ class PrismHttpTransport(BaseTransport):
                     "content": [{"type": "input_text", "text": input_text}],
                 }
             ],
-            "metadata": {
-                "projectId": project_id,
-                "userId": session.context_binding.get("user_id", "user-default"),
-                "model": "gpt-6-astra",
-                "reasoning_effort": "medium",
-                "frontend_origin": self.base_url,
-            },
+            "metadata": meta,
             "conversationId": conversation_id,
         }
 
@@ -183,18 +195,25 @@ class PrismHttpTransport(BaseTransport):
             # Request may have reached server -> raise error so supervisor marks UNCERTAIN
             raise ProtocolError(f"Network error during submit: {str(exc)}") from exc
 
-        task_id = res_data.get("async_job_id") or res_data.get("request_id") or f"task_{run_id}_{attempt_id}"
+        task_id = res_data.get("request_id") or res_data.get("async_job_id") or f"task_{run_id}_{attempt_id}"
+        turn_state = res_data.get("turn_state")
         
+        raw_meta = {
+            "endpoint": "/api/llm/response_with_tools_start",
+            "http_status": response.status_code,
+        }
+        if turn_state:
+            raw_meta["turn_state"] = turn_state
+        if res_data.get("status") == "completed":
+            raw_meta["initial_response"] = res_data
+
         return RemoteHandle(
             workspace_ref=project_id,
             conversation_ref=conversation_id,
             task_ref=task_id,
             message_ref=f"msg_{attempt_id}",
             server_event_cursor="seq_0",
-            raw_metadata={
-                "endpoint": "/api/llm/response_with_tools_start",
-                "http_status": response.status_code,
-            },
+            raw_metadata=raw_meta,
         )
 
     def observe_events(self, handle: RemoteHandle) -> List[Dict[str, Any]]:
@@ -202,42 +221,67 @@ class PrismHttpTransport(BaseTransport):
         if not self.cookie_header:
             raise AdmissionBlockedError("PrismHttpTransport: Auth cookie missing for event observation")
 
+        # If submit response was already completed inline
+        if handle.raw_metadata and "initial_response" in handle.raw_metadata:
+            return self.parser.parse_status_response(
+                handle.raw_metadata["initial_response"],
+                task_ref=handle.task_ref or "unknown"
+            )
+
         url = f"{self.base_url}/api/llm/response_with_tools_status"
         headers = {
             "accept": "*/*",
             "content-type": "application/json",
             "cookie": self.cookie_header,
             "origin": self.base_url,
+            "referer": f"{self.base_url}/?u={handle.workspace_ref}&pg=1&m=main.tex",
             "user-agent": "prism2api-client/0.1.1",
+        }
+
+        turn_state = (handle.raw_metadata or {}).get("turn_state") or {
+            "version": 1,
+            "conversation_id": handle.conversation_ref or "cdx1_default",
+            "prompt": "",
+            "reasoning_effort": "medium",
+            "user_id": "user-default",
+            "project_id": handle.workspace_ref or "proj-default",
+            "async_job_id": handle.task_ref,
         }
 
         payload = {
             "request_id": handle.task_ref or "req_default",
-            "turn_state": {
-                "version": 1,
-                "conversation_id": handle.conversation_ref or "cdx1_default",
-                "prompt": "",
-                "user_id": "user-default",
-                "project_id": handle.workspace_ref or "proj-default",
-                "async_job_id": handle.task_ref,
-            }
+            "turn_state": turn_state,
         }
 
-        try:
-            with httpx.Client(timeout=30.0) as client:
-                response = client.post(url, headers=headers, json=payload)
-                if response.status_code != 200:
-                    return [{
-                        "type": "RunFailed",
-                        "payload": {
-                            "task_ref": handle.task_ref,
-                            "error": f"HTTP status status failed with code {response.status_code}",
-                        }
-                    }]
-                res_data = response.json()
-                return self.parser.parse_status_response(res_data, task_ref=handle.task_ref or "unknown")
-        except httpx.RequestError as exc:
-            raise ProtocolError(f"Network error during status observation: {str(exc)}") from exc
+        start_time = time.monotonic()
+        timeout = 45.0
+        while time.monotonic() - start_time < timeout:
+            try:
+                with httpx.Client(timeout=30.0) as client:
+                    response = client.post(url, headers=headers, json=payload)
+                    if response.status_code != 200:
+                        return [{
+                            "type": "RunFailed",
+                            "payload": {
+                                "task_ref": handle.task_ref,
+                                "error": f"HTTP status failed with code {response.status_code}",
+                            }
+                        }]
+                    res_data = response.json()
+                    parsed = self.parser.parse_status_response(res_data, task_ref=handle.task_ref or "unknown")
+                    
+                    # If we got a terminal event (RunCompleted / RunFailed / CancellationConfirmed)
+                    if any(e.get("type") in ("RunCompleted", "RunFailed", "CancellationConfirmed") for e in parsed):
+                        return parsed
+                    
+                    time.sleep(1.0)
+            except httpx.RequestError as exc:
+                raise ProtocolError(f"Network error during status observation: {str(exc)}") from exc
+
+        return [{
+            "type": "RunFailed",
+            "payload": {"task_ref": handle.task_ref, "error": "Status observation timed out"}
+        }]
 
     def lookup_events(self, session: TransportSession, handle: RemoteHandle) -> Dict[str, Any]:
         """Read-only lookup for task status on prism.openai.com."""
@@ -251,3 +295,9 @@ class PrismHttpTransport(BaseTransport):
     def close(self) -> None:
         """Close transport resources."""
         pass
+
+
+def create_prism_http_transport(auth_profile: Optional[AuthProfile] = None, settings: Optional[Any] = None) -> PrismHttpTransport:
+    """Factory function for PrismHttpTransport."""
+    return PrismHttpTransport(auth_profile=auth_profile)
+
