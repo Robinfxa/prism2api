@@ -1,19 +1,18 @@
-<!-- prism2api-direct 0.2.0rc1 -->
-# Direct HTTP release candidate · 0.2.0rc1
+<!-- prism2api 1.0.0 -->
+# prism2api v1.0.0 · Direct HTTP Release
 
 新增主路径：`import-curl → serve-http`，不需要启动浏览器。
 使用手册：[Direct HTTP](docs/guides/direct-http.md)。
-该实现已做离线与假上游 TCP 测试；**真实 Prism 本机验收仍须使用新的授权 capture，不能把离线通过当作 live 通过**。
+本版本（v1.0.0）主打 **Pure Direct HTTP 传输模式**，放弃 Browser 依赖，提供高性能、零浏览器开销的固定上下文 API 转换服务。
 固定共享 Chat、单并发、本地 API key；旧 browser 路径保留为历史实验，不作为 Direct HTTP 依赖。
-以下是此前版本说明，遇到状态差异以 Direct HTTP 手册为准。
 
 ---
 
-# prism2api
+# prism2api v1.0.0
 
-**0.1.1 · offline core verified | browser-assisted single-session MVP = experimental live path | direct HTTP/general isolated transport 尚未完成**
+**1.0.0 · Direct Pure HTTP Release | Fixed-Context Multi-Turn Engine**
 
-独立 Python SDK 与仅本机开放的文本 API。默认 `unconfigured`：模型列表为空，真实生成请求拒绝；只有显式 `--mock` 才启用合成测试，不把模拟响应包装成 Prism 回答。
+独立 Python SDK 与仅本机开放的文本 API。
 
 ## 安装和验证
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "prism2api"
-version = "0.2.0rc1"
+version = "1.0.0"
 description = "Local Prism adapter runtime; live transport requires independent verification"
 requires-python = ">=3.11"
 dependencies = ["pydantic>=2.10,<3", "fastapi>=0.115,<1", "httpx>=0.27,<1", "uvicorn>=0.30,<1"]
