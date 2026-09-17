@@ -166,8 +166,8 @@ class PrismHttpTransport(BaseTransport):
             "reasoning_effort": "medium",
             "frontend_origin": self.base_url,
         }
-        sb_url = session.context_binding.get("sandbox_url") or "https://prism.openai.com/s/sandboxes/proxy/"
-        sb_token = session.context_binding.get("sandbox_token") or getattr(self, "sandbox_token", None) or "sandbox_token_fixture"
+        sb_url = session.context_binding.get("sandbox_url")
+        sb_token = session.context_binding.get("sandbox_token")
         if sb_url:
             meta["sandbox_url"] = sb_url
         if sb_token:
