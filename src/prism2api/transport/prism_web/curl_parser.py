@@ -36,10 +36,10 @@ def parse_curl_command(curl_text: str) -> Dict[str, Optional[str]]:
     if cookie_match:
         cookie_header = cookie_match.group(1).strip()
 
-    # Match --data-raw 'json_str' or -d 'json_str' or --data 'json_str'
-    data_match = re.search(r"(?:--data-raw|-d|--data)\s+['\"]({.*})['\"]", clean, re.DOTALL)
+    # Match --data-raw $'json_str' or --data-raw 'json_str' or -d 'json_str' or --data 'json_str'
+    data_match = re.search(r"(?:--data-raw|-d|--data)\s+\$?['\"]({.*})['\"]", clean, re.DOTALL)
     if not data_match:
-        data_match = re.search(r"(?:--data-raw|-d|--data)\s+['\"]([^'\"]+)['\"]", clean, re.DOTALL)
+        data_match = re.search(r"(?:--data-raw|-d|--data)\s+\$?['\"]([^'\"]+)['\"]", clean, re.DOTALL)
 
     parsed_json: Dict[str, Any] = {}
     if data_match:
@@ -53,10 +53,34 @@ def parse_curl_command(curl_text: str) -> Dict[str, Optional[str]]:
     turn_state = parsed_json.get("turn_state", {}) if isinstance(parsed_json, dict) else {}
 
     user_id = metadata.get("userId") or turn_state.get("user_id") or parsed_json.get("user_id")
+    if not user_id:
+        m = re.search(r'"userId"\s*:\s*"([^"]+)"', clean) or re.search(r'"user_id"\s*:\s*"([^"]+)"', clean)
+        if m:
+            user_id = m.group(1)
+
     project_id = metadata.get("projectId") or turn_state.get("project_id") or parsed_json.get("project_id")
+    if not project_id:
+        m = re.search(r'"projectId"\s*:\s*"([^"]+)"', clean) or re.search(r'"project_id"\s*:\s*"([^"]+)"', clean)
+        if m:
+            project_id = m.group(1)
+
     conversation_id = parsed_json.get("conversationId") or turn_state.get("conversation_id") or parsed_json.get("conversation_id")
+    if not conversation_id:
+        m = re.search(r'"conversationId"\s*:\s*"([^"]+)"', clean) or re.search(r'"conversation_id"\s*:\s*"([^"]+)"', clean)
+        if m:
+            conversation_id = m.group(1)
+
     sandbox_url = metadata.get("sandbox_url") or turn_state.get("sandbox_url")
+    if not sandbox_url:
+        m = re.search(r'"sandbox_url"\s*:\s*"([^"]+)"', clean)
+        if m:
+            sandbox_url = m.group(1)
+
     sandbox_token = metadata.get("sandbox_token") or turn_state.get("sandbox_token")
+    if not sandbox_token:
+        m = re.search(r'"sandbox_token"\s*:\s*"([^"]+)"', clean)
+        if m:
+            sandbox_token = m.group(1)
 
     return {
         "cookie_header": cookie_header,
