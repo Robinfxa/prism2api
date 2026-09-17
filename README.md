@@ -27,7 +27,21 @@ python3 -m venv .venv
 
 ## Browser-Assisted Single-Session MVP (v0.1)
 
-使用本机的 `PrismLiveProfile` 凭据（位于 `~/.prism2api/live-profile.json`，权限 `0600`）及活跃 Prism 页面运行 `serve-browser`：
+### cURL 自动解析与凭据导入 (import-curl)
+
+可在浏览器 DevTools 中对成功的生成请求右键选择 **Copy as cURL**，使用本机命令自动清洗并导入最新登录凭据与会话：
+
+```bash
+# 方法一：从保存的 cURL 文本文件导入
+python -m prism2api import-curl --file /path/to/curl.txt
+
+# 方法二：从标准输入管道导入
+pbpaste | python -m prism2api import-curl
+```
+
+脚本会自动解析并提取 Cookie Header、`user_id`、`project_id`、`conversation_id` 及沙盒 Token，受保护存入 `~/.prism2api/live-profile.json` (权限 `0600`)，**绝不向终端或日志打印任何明文 Secret**。
+
+使用凭据运行 `serve-browser`：
 
 ```bash
 python -m prism2api serve-browser \
